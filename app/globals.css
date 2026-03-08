@@ -199,7 +199,7 @@ button {
 
 @keyframes cardFocus {
   0% {
-    filter: blur(4px);
+    filter: blur(1.5px);
     transform: var(--card-transform) scale(0.92);
   }
   45% {
@@ -207,7 +207,7 @@ button {
     transform: var(--card-transform) scale(1.02);
   }
   100% {
-    filter: blur(4px);
+    filter: blur(1.5px);
     transform: var(--card-transform) scale(0.92);
   }
 }
