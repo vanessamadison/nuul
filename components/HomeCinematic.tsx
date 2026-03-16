@@ -1,33 +1,32 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import anime from "animejs";
 import GradientBackdrop from "@/components/GradientBackdrop";
+import DragCarousel, { CarouselItem } from "@/components/DragCarousel";
 import { playHover, startDrone } from "@/lib/sfx";
 
-const filters = [
-  { name: "Graphite", note: "Matte blacks, clean UI", hue: "#1b1d22", width: 200, height: 280 },
-  { name: "Warm Film", note: "Soft amber shadows", hue: "#3a2b22", width: 180, height: 240 },
-  { name: "Soft Grain", note: "Muted highlights", hue: "#2a2c33", width: 170, height: 230 },
-  { name: "Noir", note: "High contrast grit", hue: "#16181c", width: 190, height: 260 },
-  { name: "Studio", note: "Muted neutrals", hue: "#2c2422", width: 210, height: 300 },
-  { name: "Chrome", note: "Cold clean edges", hue: "#222a33", width: 175, height: 220 },
-  { name: "Dusk", note: "Blue hour haze", hue: "#2a2434", width: 185, height: 250 },
-  { name: "Ritual", note: "Gold undertones", hue: "#3c2d23", width: 205, height: 270 },
-  { name: "Mercury", note: "Silver night", hue: "#24282e", width: 165, height: 210 },
-  { name: "Nightfall", note: "Satin shadows", hue: "#14151a", width: 195, height: 265 },
-  { name: "Sable", note: "Muted slate", hue: "#1a1c20", width: 175, height: 230 },
-  { name: "Lumen", note: "Soft glow", hue: "#2a2520", width: 185, height: 240 },
-  { name: "Slate", note: "Urban calm", hue: "#14161b", width: 180, height: 235 },
-  { name: "Muse", note: "Soft contrast", hue: "#221d1a", width: 190, height: 245 }
+const filters: CarouselItem[] = [
+  { id: "graphite", label: "Graphite", image: "/images/filters/graphite.jpg", gradient: "from-[#1a1d22] via-[#2c3038] to-[#40444c]" },
+  { id: "warm", label: "Warm Film", image: "/images/filters/warm.jpg", gradient: "from-[#2a1f18] via-[#4c3a2a] to-[#7a604a]" },
+  { id: "soft", label: "Soft Grain", image: "/images/filters/soft.jpg", gradient: "from-[#22202a] via-[#3a3c48] to-[#4d4f58]" },
+  { id: "noir", label: "Noir", image: "/images/filters/noir.jpg", gradient: "from-[#141518] via-[#242830] to-[#363c46]" },
+  { id: "studio", label: "Studio", image: "/images/filters/studio.jpg", gradient: "from-[#1e1a1f] via-[#3a3234] to-[#4a4140]" },
+  { id: "chrome", label: "Chrome", image: "/images/filters/chrome.jpg", gradient: "from-[#182024] via-[#304048] to-[#4a5860]" },
+  { id: "dusk", label: "Dusk", image: "/images/filters/dusk.jpg", gradient: "from-[#1a1824] via-[#36304a] to-[#544a66]" },
+  { id: "ritual", label: "Ritual", image: "/images/filters/ritual.jpg", gradient: "from-[#241e18] via-[#4c3a2a] to-[#6a5040]" },
 ];
 
 export default function HomeCinematic() {
-  const [phase, setPhase] = useState<"intro" | "orbit" | "exit" | "cta">("intro");
+  const [phase, setPhase] = useState<"intro" | "carousel" | "cta">("intro");
+  const [selectedFilter, setSelectedFilter] = useState("graphite");
   const [reducedMotion, setReducedMotion] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const ringRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -39,7 +38,11 @@ export default function HomeCinematic() {
 
   useEffect(() => {
     const handler = () => {
-      startDrone();
+      try {
+        startDrone();
+      } catch {
+        // Silent fail
+      }
       window.removeEventListener("pointerdown", handler);
     };
     window.addEventListener("pointerdown", handler, { once: true });
@@ -48,27 +51,14 @@ export default function HomeCinematic() {
 
   useEffect(() => {
     const timers = [
-      window.setTimeout(() => setPhase("orbit"), 600),
-      window.setTimeout(() => setPhase("exit"), 6400),
-      window.setTimeout(() => setPhase("cta"), 7600)
+      window.setTimeout(() => setPhase("carousel"), 300),
+      window.setTimeout(() => setPhase("cta"), 900),
     ];
     return () => timers.forEach((t) => window.clearTimeout(t));
   }, []);
 
   useEffect(() => {
-    if (!ringRef.current || reducedMotion) return;
-    anime({
-      targets: ringRef.current,
-      keyframes: [
-        { rotateY: 240, duration: 5200, easing: "easeOutSine" },
-        { rotateY: 720, duration: 1400, easing: "easeInCubic" }
-      ],
-      loop: false
-    });
-  }, [reducedMotion]);
-
-  useEffect(() => {
-    if (!canvasRef.current) return;
+    if (!mounted || !canvasRef.current) return;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
@@ -79,13 +69,13 @@ export default function HomeCinematic() {
     resize();
     window.addEventListener("resize", resize);
 
-    const points = Array.from({ length: 160 }, () => ({
+    const points = Array.from({ length: 80 }, () => ({
       x: Math.random() * canvas.width,
       y: Math.random() * canvas.height,
-      vx: (Math.random() - 0.5) * 0.25,
-      vy: -Math.random() * 0.35 - 0.05,
-      r: Math.random() * 1.6 + 0.4,
-      a: Math.random() * 0.35 + 0.05
+      vx: (Math.random() - 0.5) * 0.15,
+      vy: -Math.random() * 0.2 - 0.03,
+      r: Math.random() * 1.2 + 0.3,
+      a: Math.random() * 0.3 + 0.08,
     }));
 
     let raf = 0;
@@ -100,7 +90,7 @@ export default function HomeCinematic() {
         }
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(201,162,107,${p.a})`;
+        ctx.fillStyle = `rgba(255,200,130,${p.a})`;
         ctx.fill();
       });
       raf = requestAnimationFrame(tick);
@@ -110,103 +100,123 @@ export default function HomeCinematic() {
       window.removeEventListener("resize", resize);
       cancelAnimationFrame(raf);
     };
-  }, []);
+  }, [mounted]);
 
-  const ringStyle = useMemo(
-    () => ({
-      transform: reducedMotion ? "none" : "translateZ(0)",
-      marginLeft: 0,
-      marginRight: 0
-    }),
-    [reducedMotion]
-  );
-
-  return (
-    <div className="relative min-h-screen bg-black text-white">
-      <GradientBackdrop />
-      <section className="relative flex min-h-[100svh] flex-col items-center justify-center overflow-hidden px-6 pb-20 pt-10 text-center">
-        <div className="pointer-events-none absolute inset-0">
-          <canvas ref={canvasRef} className="absolute inset-0 opacity-70" />
-          <div className="scanline-layer absolute inset-0 opacity-30" />
-          <div className="liquid-orb absolute left-1/2 top-1/2 h-[720px] w-[720px] -translate-x-1/2 -translate-y-1/2 rounded-full" />
-          <div className="absolute inset-0 bg-gradient-to-b from-black/90 via-black/70 to-black/95" />
-        </div>
-
-        <div className="relative z-10 max-w-2xl transition-all duration-700">
-          <div
-            className={`text-[0.7rem] uppercase tracking-[0.6em] ${
-              phase === "cta" ? "opacity-0 -translate-y-3" : "opacity-100 translate-y-0"
-            } bg-gradient-to-r from-[#e0c9a0] via-[#bda47a] to-[#7c6a54] bg-clip-text text-transparent transition-all duration-700`}
-          >
-            NUUL
-          </div>
-        </div>
-
-        <div className="relative z-10 mt-2 flex h-[46vh] w-full max-w-4xl min-h-[280px] max-h-[420px] items-center justify-center">
-          <div className="ring-shell relative h-full w-full">
-            <div
-              ref={ringRef}
-              className={`filter-ring h-full w-full ${
-                phase === "exit" ? "ring-exit" : phase === "cta" ? "ring-hidden" : ""
-              }`}
-              style={ringStyle}
-            >
-            {filters.map((filter, index) => {
-              const phi = Math.acos(-1 + (2 * index) / (filters.length - 1));
-              const theta = Math.PI * (1 + Math.sqrt(5)) * index;
-              const radius = 300;
-              const x = Math.cos(theta) * Math.sin(phi) * radius;
-              const y = Math.sin(theta) * Math.sin(phi) * (radius * 0.55);
-              const z = Math.cos(phi) * radius;
-              const scale = 0.78 + (z / radius + 1) * 0.18;
-              return (
-                <div
-                  key={filter.name}
-                  className="filter-card absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-3xl border border-white/15 bg-white/5 p-4 text-center backdrop-blur"
-                  style={{
-                    ["--card-transform" as "--card-transform"]: `translate3d(${x}px, ${y}px, ${z}px) rotateY(${theta * (180 / Math.PI)}deg) scale(${scale.toFixed(2)})`,
-                    width: `${Math.round(filter.width * scale)}px`,
-                    height: `${Math.round(filter.height * scale)}px`,
-                    animationDelay: `${index * 0.2}s`,
-                    ["--card-color" as "--card-color"]: filter.hue
-                  } as React.CSSProperties}
-                >
-                  <div className="text-sm font-semibold">{filter.name}</div>
-                  <div className="mt-1 text-[0.65rem] text-white/60">{filter.note}</div>
-                  <div className="filter-sheen absolute inset-0 rounded-2xl" />
-                </div>
-              );
-            })}
+  // SSR placeholder
+  if (!mounted) {
+    return (
+      <div className="relative min-h-screen bg-black text-white">
+        <div className="flex min-h-screen items-center justify-center">
+          <div className="text-center">
+            <div className="text-5xl font-bold tracking-[0.3em] text-white/20">
+              NUUL
             </div>
           </div>
         </div>
+      </div>
+    );
+  }
 
+  return (
+    <div className="relative min-h-screen bg-black text-white overflow-hidden">
+      <GradientBackdrop />
+      <section className="relative flex min-h-[100svh] flex-col items-center justify-center px-4 pb-20 pt-8 text-center sm:px-6">
+        {/* Background layers */}
+        <div className="pointer-events-none absolute inset-0">
+          <canvas ref={canvasRef} className="absolute inset-0 opacity-50" />
+          <div className="scanline-layer absolute inset-0 opacity-10" />
+          <div className="warm-orb absolute left-1/2 top-1/2 h-[500px] w-[500px] -translate-x-1/2 -translate-y-1/2 rounded-full sm:h-[650px] sm:w-[650px]" />
+          <div className="absolute inset-0 bg-gradient-to-b from-black/80 via-black/40 to-black/90" />
+        </div>
+
+        {/* Beautiful NUUL Hero */}
+        <div className="relative z-10 mb-10 max-w-2xl">
+          <h1
+            className={`hero-text text-5xl font-bold tracking-[0.25em] transition-all duration-1000 sm:text-6xl md:text-7xl ${
+              phase === "cta" ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"
+            }`}
+          >
+            <span className="bg-gradient-to-br from-white via-amber-100 to-amber-200/80 bg-clip-text text-transparent drop-shadow-2xl">
+              NUUL
+            </span>
+          </h1>
+          <p
+            className={`mt-5 text-base text-white/80 transition-all duration-700 delay-200 sm:text-lg ${
+              phase === "cta" ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+            }`}
+          >
+            Protect your photos. Strip metadata. Export safely.
+          </p>
+        </div>
+
+        {/* Carousel section */}
         <div
-          className={`relative z-10 mt-4 flex w-full flex-col items-center pb-20 text-center transition-all duration-700 ${
+          className={`relative z-10 w-full max-w-2xl transition-all duration-700 ${
+            phase === "carousel" || phase === "cta"
+              ? "opacity-100 translate-y-0"
+              : "opacity-0 translate-y-8"
+          }`}
+        >
+          <DragCarousel
+            items={filters}
+            selectedId={selectedFilter}
+            onSelect={(id) => {
+              setSelectedFilter(id);
+              playHover();
+            }}
+            autoRotate={true}
+            autoRotateInterval={3500}
+          />
+        </div>
+
+        {/* CTA section */}
+        <div
+          className={`relative z-10 mt-10 flex flex-col items-center transition-all duration-700 delay-300 ${
             phase === "cta" ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"
           }`}
         >
-          <div
-            className={`mb-5 transition-all duration-700 ${
-              phase === "cta" ? "opacity-100 translate-y-0 scale-100" : "opacity-0 translate-y-4 scale-95"
-            }`}
-          >
-            <div className="text-[0.65rem] uppercase tracking-[0.5em] text-white/60">NUUL STUDIO</div>
-            <h1 className="mt-4 text-4xl font-semibold tracking-[-0.03em] md:text-6xl">Safe Export</h1>
-            <p className="mt-3 text-sm text-white/70 md:text-base">
-              Local-first privacy for screenshots. Filters first, leaks last. No uploads. No accounts.
-            </p>
-            <div className="mt-2 text-[0.7rem] uppercase tracking-[0.4em] text-white/50">Set the mood</div>
-          </div>
           <Link
-            href="/studio?import=1"
+            href={`/studio?preset=${selectedFilter}&import=1`}
             onMouseEnter={() => playHover()}
-            className="rounded-2xl border border-white/30 bg-white/15 px-10 py-4 text-xs uppercase tracking-[0.3em] backdrop-blur transition hover:border-white/70"
+            className="group relative overflow-hidden rounded-2xl border border-white/40 bg-white/10 px-8 py-4 text-sm font-medium uppercase tracking-[0.2em] text-white backdrop-blur-sm transition-all hover:border-white/70 hover:bg-white/20 active:scale-[0.98] sm:px-12 sm:text-xs sm:tracking-[0.3em]"
           >
-            Upload your image(s)
+            <span className="relative z-10">Upload Your Images</span>
+            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
           </Link>
-          <div className="mt-6 text-[0.65rem] uppercase tracking-[0.4em] text-white/50">
-            Protect in style
+
+          <div className="mt-6 flex items-center gap-5 text-[0.65rem] uppercase tracking-[0.25em] text-white/60 sm:gap-6 sm:text-[0.7rem]">
+            <span className="flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              100% Local
+            </span>
+            <span className="flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              No Uploads
+            </span>
+          </div>
+        </div>
+
+        {/* Bottom hint */}
+        <div
+          className={`absolute bottom-6 left-0 right-0 text-center transition-all duration-700 ${
+            phase === "cta" ? "opacity-100" : "opacity-0"
+          }`}
+        >
+          <div className="inline-flex items-center gap-2 text-[0.6rem] uppercase tracking-[0.25em] text-white/40 sm:text-[0.65rem]">
+            <span>Swipe to explore</span>
+            <svg
+              className="h-3 w-3 animate-pulse"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M14 5l7 7m0 0l-7 7m7-7H3"
+              />
+            </svg>
           </div>
         </div>
       </section>

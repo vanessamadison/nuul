@@ -4,25 +4,31 @@ import { useEffect } from "react";
 import { installNetworkMonitor } from "@/lib/monitor/network";
 import { applyTheme, loadTheme } from "@/lib/theme";
 import NetworkOverlay from "@/components/NetworkOverlay";
-import { OCRClient } from "@/lib/pipeline/ocr";
 import { playChime } from "@/lib/sfx";
 
 export default function ClientRuntime() {
   useEffect(() => {
-    installNetworkMonitor();
-    applyTheme(loadTheme());
-    const ocrClient = new OCRClient();
-    ocrClient
-      .warmUp()
-      .then(() => {
+    try {
+      installNetworkMonitor();
+      applyTheme(loadTheme());
+    } catch {
+      // Silent fail for non-critical initialization
+    }
+
+    // Lazy load OCR client to avoid blocking render
+    const initOcr = async () => {
+      try {
+        const { OCRClient } = await import("@/lib/pipeline/ocr");
+        const ocrClient = new OCRClient();
+        await ocrClient.warmUp();
         (window as typeof window & { __nuulOcrReady?: boolean }).__nuulOcrReady = true;
-      })
-      .catch(() => {
+      } catch {
         (window as typeof window & { __nuulOcrReady?: boolean }).__nuulOcrReady = false;
-      })
-      .finally(() => {
+      } finally {
         (window as typeof window & { __nuulOcrWarm?: boolean }).__nuulOcrWarm = true;
-      });
+      }
+    };
+    initOcr();
   }, []);
 
   useEffect(() => {
