@@ -1,13 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Image from "next/image";
 
 export interface CarouselItem {
   id: string;
   label: string;
-  description?: string;
+  image?: string;
   gradient: string;
-  icon?: React.ReactNode;
 }
 
 interface DragCarouselProps {
@@ -15,8 +15,8 @@ interface DragCarouselProps {
   selectedId?: string;
   onSelect?: (id: string) => void;
   className?: string;
-  cardWidth?: number;
-  cardHeight?: number;
+  autoRotate?: boolean;
+  autoRotateInterval?: number;
 }
 
 export default function DragCarousel({
@@ -24,8 +24,8 @@ export default function DragCarousel({
   selectedId,
   onSelect,
   className = "",
-  cardWidth: propCardWidth,
-  cardHeight: propCardHeight,
+  autoRotate = true,
+  autoRotateInterval = 4000,
 }: DragCarouselProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -34,27 +34,25 @@ export default function DragCarousel({
   const [scrollLeft, setScrollLeft] = useState(0);
   const [velocity, setVelocity] = useState(0);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [isMobile, setIsMobile] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [isInteracting, setIsInteracting] = useState(false);
   const lastX = useRef(0);
   const lastTime = useRef(0);
   const rafRef = useRef<number>(0);
   const momentumRef = useRef<number>(0);
+  const autoRotateRef = useRef<NodeJS.Timeout | null>(null);
+  const interactionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Detect mobile for responsive sizing
+  // Responsive card dimensions
+  const cardWidth = 130;
+  const cardHeight = 175;
+  const gap = 14;
+  const totalCardWidth = cardWidth + gap;
+
+  // Detect mount
   useEffect(() => {
     setMounted(true);
-    const checkMobile = () => setIsMobile(window.innerWidth < 640);
-    checkMobile();
-    window.addEventListener("resize", checkMobile);
-    return () => window.removeEventListener("resize", checkMobile);
   }, []);
-
-  // Card dimensions - responsive
-  const cardWidth = propCardWidth ?? (isMobile ? 120 : 140);
-  const cardHeight = propCardHeight ?? (isMobile ? 160 : 180);
-  const gap = isMobile ? 12 : 16;
-  const totalCardWidth = cardWidth + gap;
 
   // Get center position for a card index
   const getCenterPosition = useCallback(
@@ -64,6 +62,38 @@ export default function DragCarousel({
       return index * totalCardWidth - containerWidth / 2 + cardWidth / 2;
     },
     [totalCardWidth, cardWidth]
+  );
+
+  // Smooth scroll to index
+  const scrollToIndex = useCallback(
+    (index: number, duration = 500) => {
+      if (!trackRef.current || !containerRef.current) return;
+
+      const clampedIndex = Math.max(0, Math.min(items.length - 1, index));
+      setCurrentIndex(clampedIndex);
+
+      const targetScroll = getCenterPosition(clampedIndex);
+      const startScroll = trackRef.current.scrollLeft;
+      const distance = targetScroll - startScroll;
+      const startTime = performance.now();
+
+      const animate = (time: number) => {
+        const elapsed = time - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        const eased = 1 - Math.pow(1 - progress, 3);
+
+        if (trackRef.current) {
+          trackRef.current.scrollLeft = startScroll + distance * eased;
+        }
+
+        if (progress < 1) {
+          rafRef.current = requestAnimationFrame(animate);
+        }
+      };
+
+      rafRef.current = requestAnimationFrame(animate);
+    },
+    [items.length, getCenterPosition]
   );
 
   // Snap to nearest card
@@ -79,41 +109,52 @@ export default function DragCarousel({
     const clampedIndex = Math.max(0, Math.min(items.length - 1, nearestIndex));
 
     setCurrentIndex((prev) => {
-      // Trigger haptic on index change
-      if (clampedIndex !== prev) {
-        if (typeof navigator !== "undefined" && "vibrate" in navigator) {
-          navigator.vibrate(5);
-        }
+      if (clampedIndex !== prev && typeof navigator !== "undefined" && "vibrate" in navigator) {
+        navigator.vibrate(5);
       }
       return clampedIndex;
     });
 
-    const targetScroll = getCenterPosition(clampedIndex);
+    scrollToIndex(clampedIndex, 400);
+  }, [items.length, totalCardWidth, cardWidth, scrollToIndex]);
 
-    // Smooth scroll animation
-    const startScroll = trackRef.current.scrollLeft;
-    const distance = targetScroll - startScroll;
-    const duration = 400;
-    const startTime = performance.now();
+  // Auto-rotate logic
+  useEffect(() => {
+    if (!autoRotate || !mounted || isInteracting) return;
 
-    const animate = (time: number) => {
-      const elapsed = time - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-
-      // Ease out cubic
-      const eased = 1 - Math.pow(1 - progress, 3);
-
-      if (trackRef.current) {
-        trackRef.current.scrollLeft = startScroll + distance * eased;
-      }
-
-      if (progress < 1) {
-        rafRef.current = requestAnimationFrame(animate);
-      }
+    const startAutoRotate = () => {
+      autoRotateRef.current = setInterval(() => {
+        setCurrentIndex((prev) => {
+          const nextIndex = (prev + 1) % items.length;
+          scrollToIndex(nextIndex, 600);
+          return nextIndex;
+        });
+      }, autoRotateInterval);
     };
 
-    rafRef.current = requestAnimationFrame(animate);
-  }, [items.length, totalCardWidth, cardWidth, getCenterPosition]);
+    startAutoRotate();
+
+    return () => {
+      if (autoRotateRef.current) {
+        clearInterval(autoRotateRef.current);
+      }
+    };
+  }, [autoRotate, autoRotateInterval, items.length, mounted, isInteracting, scrollToIndex]);
+
+  // Handle user interaction pause
+  const pauseAutoRotate = useCallback(() => {
+    setIsInteracting(true);
+    if (autoRotateRef.current) {
+      clearInterval(autoRotateRef.current);
+    }
+    if (interactionTimeoutRef.current) {
+      clearTimeout(interactionTimeoutRef.current);
+    }
+    // Resume auto-rotate after 8 seconds of no interaction
+    interactionTimeoutRef.current = setTimeout(() => {
+      setIsInteracting(false);
+    }, 8000);
+  }, []);
 
   // Apply momentum scrolling
   const applyMomentum = useCallback(() => {
@@ -146,6 +187,7 @@ export default function DragCarousel({
     (e: React.PointerEvent) => {
       if (!trackRef.current) return;
 
+      pauseAutoRotate();
       cancelAnimationFrame(rafRef.current);
       cancelAnimationFrame(momentumRef.current);
 
@@ -158,7 +200,7 @@ export default function DragCarousel({
 
       (e.target as HTMLElement).setPointerCapture(e.pointerId);
     },
-    []
+    [pauseAutoRotate]
   );
 
   // Handle pointer move
@@ -170,12 +212,11 @@ export default function DragCarousel({
       const walk = x - startX;
       trackRef.current.scrollLeft = scrollLeft - walk;
 
-      // Calculate velocity
       const now = performance.now();
       const dt = now - lastTime.current;
       if (dt > 0) {
         const dx = x - lastX.current;
-        setVelocity(dx / dt * 16); // Normalize to 60fps
+        setVelocity((dx / dt) * 16);
       }
       lastX.current = x;
       lastTime.current = now;
@@ -191,10 +232,8 @@ export default function DragCarousel({
       setIsDragging(false);
       (e.target as HTMLElement).releasePointerCapture(e.pointerId);
 
-      // Check if it was a tap (minimal movement)
       const movedDistance = Math.abs(e.clientX - startX);
       if (movedDistance < 5) {
-        // It was a tap, don't apply momentum
         snapToNearest();
         return;
       }
@@ -216,41 +255,18 @@ export default function DragCarousel({
     (index: number, id: string) => {
       if (isDragging) return;
 
+      pauseAutoRotate();
       setCurrentIndex(index);
       onSelect?.(id);
       triggerHaptic();
-
-      // Smooth scroll to center the clicked card
-      if (!trackRef.current) return;
-      const targetScroll = getCenterPosition(index);
-
-      const startScroll = trackRef.current.scrollLeft;
-      const distance = targetScroll - startScroll;
-      const duration = 500;
-      const startTime = performance.now();
-
-      const animate = (time: number) => {
-        const elapsed = time - startTime;
-        const progress = Math.min(elapsed / duration, 1);
-        const eased = 1 - Math.pow(1 - progress, 3);
-
-        if (trackRef.current) {
-          trackRef.current.scrollLeft = startScroll + distance * eased;
-        }
-
-        if (progress < 1) {
-          rafRef.current = requestAnimationFrame(animate);
-        }
-      };
-
-      rafRef.current = requestAnimationFrame(animate);
+      scrollToIndex(index, 500);
     },
-    [isDragging, onSelect, getCenterPosition, triggerHaptic]
+    [isDragging, onSelect, pauseAutoRotate, scrollToIndex, triggerHaptic]
   );
 
   // Initialize scroll position
   useEffect(() => {
-    if (!trackRef.current || !containerRef.current) return;
+    if (!mounted || !trackRef.current || !containerRef.current) return;
 
     const initialIndex = selectedId
       ? items.findIndex((item) => item.id === selectedId)
@@ -260,25 +276,28 @@ export default function DragCarousel({
     setCurrentIndex(validIndex);
     const targetScroll = getCenterPosition(validIndex);
     trackRef.current.scrollLeft = targetScroll;
-  }, [items, selectedId, getCenterPosition]);
+  }, [items, selectedId, getCenterPosition, mounted]);
 
   // Handle wheel scroll
-  const handleWheel = useCallback((e: WheelEvent) => {
-    e.preventDefault();
-    if (!trackRef.current) return;
+  const handleWheel = useCallback(
+    (e: WheelEvent) => {
+      e.preventDefault();
+      if (!trackRef.current) return;
 
-    cancelAnimationFrame(rafRef.current);
-    cancelAnimationFrame(momentumRef.current);
+      pauseAutoRotate();
+      cancelAnimationFrame(rafRef.current);
+      cancelAnimationFrame(momentumRef.current);
 
-    trackRef.current.scrollLeft += e.deltaX || e.deltaY;
-    setVelocity(0);
+      trackRef.current.scrollLeft += e.deltaX || e.deltaY;
+      setVelocity(0);
 
-    // Debounce snap
-    clearTimeout((handleWheel as unknown as { timeout: number }).timeout);
-    (handleWheel as unknown as { timeout: number }).timeout = window.setTimeout(() => {
-      snapToNearest();
-    }, 150);
-  }, [snapToNearest]);
+      clearTimeout((handleWheel as unknown as { timeout: number }).timeout);
+      (handleWheel as unknown as { timeout: number }).timeout = window.setTimeout(() => {
+        snapToNearest();
+      }, 150);
+    },
+    [snapToNearest, pauseAutoRotate]
+  );
 
   useEffect(() => {
     const track = trackRef.current;
@@ -292,9 +311,11 @@ export default function DragCarousel({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "ArrowLeft") {
+        pauseAutoRotate();
         const newIndex = Math.max(0, currentIndex - 1);
         handleCardClick(newIndex, items[newIndex].id);
       } else if (e.key === "ArrowRight") {
+        pauseAutoRotate();
         const newIndex = Math.min(items.length - 1, currentIndex + 1);
         handleCardClick(newIndex, items[newIndex].id);
       }
@@ -302,13 +323,15 @@ export default function DragCarousel({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [currentIndex, items, handleCardClick]);
+  }, [currentIndex, items, handleCardClick, pauseAutoRotate]);
 
   // Clean up on unmount
   useEffect(() => {
     return () => {
       cancelAnimationFrame(rafRef.current);
       cancelAnimationFrame(momentumRef.current);
+      if (autoRotateRef.current) clearInterval(autoRotateRef.current);
+      if (interactionTimeoutRef.current) clearTimeout(interactionTimeoutRef.current);
     };
   }, []);
 
@@ -316,11 +339,11 @@ export default function DragCarousel({
   if (!mounted) {
     return (
       <div className={`relative w-full ${className}`}>
-        <div className="flex justify-center gap-4 py-8">
+        <div className="flex justify-center gap-3 py-8">
           {items.slice(0, 3).map((item) => (
             <div
               key={item.id}
-              className={`h-[180px] w-[140px] animate-pulse rounded-2xl bg-gradient-to-br opacity-50 ${item.gradient}`}
+              className="h-[175px] w-[130px] animate-pulse rounded-2xl bg-white/5"
             />
           ))}
         </div>
@@ -331,8 +354,8 @@ export default function DragCarousel({
   return (
     <div className={`relative w-full ${className}`} ref={containerRef}>
       {/* Gradient fades */}
-      <div className="pointer-events-none absolute left-0 top-0 z-10 h-full w-16 bg-gradient-to-r from-black to-transparent" />
-      <div className="pointer-events-none absolute right-0 top-0 z-10 h-full w-16 bg-gradient-to-l from-black to-transparent" />
+      <div className="pointer-events-none absolute left-0 top-0 z-10 h-full w-8 bg-gradient-to-r from-black to-transparent sm:w-12" />
+      <div className="pointer-events-none absolute right-0 top-0 z-10 h-full w-8 bg-gradient-to-l from-black to-transparent sm:w-12" />
 
       {/* Track */}
       <div
@@ -358,19 +381,19 @@ export default function DragCarousel({
               ? item.id === selectedId
               : index === currentIndex;
             const distance = Math.abs(index - currentIndex);
-            const scale = Math.max(0.8, 1 - distance * 0.08);
-            const opacity = Math.max(0.4, 1 - distance * 0.15);
+            const scale = Math.max(0.85, 1 - distance * 0.06);
+            const opacity = Math.max(0.5, 1 - distance * 0.12);
 
             return (
               <button
                 key={item.id}
                 onClick={() => handleCardClick(index, item.id)}
                 className={`
-                  group relative flex-shrink-0 overflow-hidden rounded-2xl
+                  group relative flex-shrink-0 overflow-hidden rounded-xl
                   transition-all duration-300 ease-out
                   ${isSelected
-                    ? "ring-2 ring-white/50 ring-offset-2 ring-offset-black"
-                    : "ring-1 ring-white/10 hover:ring-white/30"
+                    ? "ring-2 ring-white/60 ring-offset-2 ring-offset-black"
+                    : "ring-1 ring-white/20 hover:ring-white/40"
                   }
                 `}
                 style={{
@@ -380,47 +403,45 @@ export default function DragCarousel({
                   opacity,
                 }}
               >
-                {/* Gradient background */}
-                <div
-                  className={`absolute inset-0 bg-gradient-to-br ${item.gradient}`}
-                />
+                {/* Image or gradient background */}
+                {item.image ? (
+                  <Image
+                    src={item.image}
+                    alt={item.label}
+                    fill
+                    className="object-cover"
+                    sizes="130px"
+                  />
+                ) : (
+                  <div className={`absolute inset-0 bg-gradient-to-br ${item.gradient}`} />
+                )}
 
-                {/* Glass overlay */}
-                <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-white/5" />
+                {/* Dark overlay for text readability */}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
 
                 {/* Shimmer effect */}
                 <div
                   className={`
-                    absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent
+                    absolute inset-0 bg-gradient-to-r from-transparent via-white/15 to-transparent
                     translate-x-[-100%] group-hover:translate-x-[100%]
                     transition-transform duration-700 ease-out
                   `}
                 />
 
-                {/* Content */}
-                <div className="relative z-10 flex h-full flex-col justify-end p-4">
-                  {item.icon && (
-                    <div className="mb-2 text-white/80">{item.icon}</div>
-                  )}
-                  <div className="text-left">
-                    <div className="text-sm font-medium text-white">
-                      {item.label}
-                    </div>
-                    {item.description && (
-                      <div className="mt-1 text-[0.65rem] text-white/60 leading-tight">
-                        {item.description}
-                      </div>
-                    )}
+                {/* Content - just the label */}
+                <div className="relative z-10 flex h-full flex-col justify-end p-3">
+                  <div className="text-sm font-medium text-white drop-shadow-lg">
+                    {item.label}
                   </div>
 
                   {/* Selection indicator */}
                   <div
                     className={`
-                      absolute right-3 top-3 h-2 w-2 rounded-full
+                      absolute right-2 top-2 h-2 w-2 rounded-full
                       transition-all duration-300
                       ${isSelected
-                        ? "bg-white scale-100"
-                        : "bg-white/30 scale-75"
+                        ? "bg-white scale-100 shadow-lg shadow-white/50"
+                        : "bg-white/40 scale-75"
                       }
                     `}
                   />
@@ -437,7 +458,7 @@ export default function DragCarousel({
       </div>
 
       {/* Progress indicators */}
-      <div className="mt-6 flex items-center justify-center gap-1.5">
+      <div className="mt-5 flex items-center justify-center gap-1.5">
         {items.map((item, index) => (
           <button
             key={item.id}
@@ -446,7 +467,7 @@ export default function DragCarousel({
               h-1 rounded-full transition-all duration-300
               ${index === currentIndex
                 ? "w-6 bg-white/80"
-                : "w-1.5 bg-white/20 hover:bg-white/40"
+                : "w-1.5 bg-white/25 hover:bg-white/50"
               }
             `}
             aria-label={`Go to ${item.label}`}
