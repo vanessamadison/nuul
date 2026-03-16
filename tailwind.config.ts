@@ -42,8 +42,9 @@ const config: Config = {
         }
       },
       fontFamily: {
+        sans: ["var(--font-inter)", "Inter", "ui-sans-serif", "system-ui", "sans-serif"],
         display: ["Fraunces", "ui-serif", "Georgia", "serif"],
-        body: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"]
+        body: ["var(--font-inter)", "Inter", "ui-sans-serif", "system-ui", "sans-serif"],
       },
       boxShadow: {
         glass: "0 20px 50px rgba(16, 8, 6, 0.25)",

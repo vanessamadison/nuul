@@ -1,33 +1,27 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import anime from "animejs";
 import GradientBackdrop from "@/components/GradientBackdrop";
+import DragCarousel, { CarouselItem } from "@/components/DragCarousel";
 import { playHover, startDrone } from "@/lib/sfx";
 
-const filters = [
-  { name: "Graphite", note: "Matte blacks, clean UI", hue: "#1b1d22", width: 200, height: 280 },
-  { name: "Warm Film", note: "Soft amber shadows", hue: "#3a2b22", width: 180, height: 240 },
-  { name: "Soft Grain", note: "Muted highlights", hue: "#2a2c33", width: 170, height: 230 },
-  { name: "Noir", note: "High contrast grit", hue: "#16181c", width: 190, height: 260 },
-  { name: "Studio", note: "Muted neutrals", hue: "#2c2422", width: 210, height: 300 },
-  { name: "Chrome", note: "Cold clean edges", hue: "#222a33", width: 175, height: 220 },
-  { name: "Dusk", note: "Blue hour haze", hue: "#2a2434", width: 185, height: 250 },
-  { name: "Ritual", note: "Gold undertones", hue: "#3c2d23", width: 205, height: 270 },
-  { name: "Mercury", note: "Silver night", hue: "#24282e", width: 165, height: 210 },
-  { name: "Nightfall", note: "Satin shadows", hue: "#14151a", width: 195, height: 265 },
-  { name: "Sable", note: "Muted slate", hue: "#1a1c20", width: 175, height: 230 },
-  { name: "Lumen", note: "Soft glow", hue: "#2a2520", width: 185, height: 240 },
-  { name: "Slate", note: "Urban calm", hue: "#14161b", width: 180, height: 235 },
-  { name: "Muse", note: "Soft contrast", hue: "#221d1a", width: 190, height: 245 }
+const filters: CarouselItem[] = [
+  { id: "graphite", label: "Graphite", description: "Strip metadata", gradient: "from-[#0d0f12] via-[#1c1f27] to-[#30323b]" },
+  { id: "warm", label: "Warm Film", description: "Gentle resize", gradient: "from-[#1a1311] via-[#3c2d23] to-[#6a503b]" },
+  { id: "soft", label: "Soft Grain", description: "Blur faces", gradient: "from-[#18161a] via-[#2a2c33] to-[#3d3f48]" },
+  { id: "noir", label: "Noir", description: "High contrast", gradient: "from-[#0b0c0f] via-[#1a1c22] to-[#2a2d36]" },
+  { id: "studio", label: "Studio", description: "OCR redact", gradient: "from-[#141115] via-[#2d2424] to-[#3a3130]" },
+  { id: "chrome", label: "Chrome", description: "QR blur", gradient: "from-[#0f1419] via-[#24303a] to-[#3a4853]" },
+  { id: "dusk", label: "Dusk", description: "Full scrub", gradient: "from-[#111018] via-[#2a2434] to-[#443b4f]" },
+  { id: "ritual", label: "Ritual", description: "Safe share", gradient: "from-[#1a1510] via-[#3c2d23] to-[#5a4530]" },
 ];
 
 export default function HomeCinematic() {
-  const [phase, setPhase] = useState<"intro" | "orbit" | "exit" | "cta">("intro");
+  const [phase, setPhase] = useState<"intro" | "carousel" | "cta">("intro");
+  const [selectedFilter, setSelectedFilter] = useState("graphite");
   const [reducedMotion, setReducedMotion] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const ringRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -48,24 +42,11 @@ export default function HomeCinematic() {
 
   useEffect(() => {
     const timers = [
-      window.setTimeout(() => setPhase("orbit"), 600),
-      window.setTimeout(() => setPhase("exit"), 6400),
-      window.setTimeout(() => setPhase("cta"), 7600)
+      window.setTimeout(() => setPhase("carousel"), 400),
+      window.setTimeout(() => setPhase("cta"), 1200),
     ];
     return () => timers.forEach((t) => window.clearTimeout(t));
   }, []);
-
-  useEffect(() => {
-    if (!ringRef.current || reducedMotion) return;
-    anime({
-      targets: ringRef.current,
-      keyframes: [
-        { rotateY: 240, duration: 5200, easing: "easeOutSine" },
-        { rotateY: 720, duration: 1400, easing: "easeInCubic" }
-      ],
-      loop: false
-    });
-  }, [reducedMotion]);
 
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -79,13 +60,13 @@ export default function HomeCinematic() {
     resize();
     window.addEventListener("resize", resize);
 
-    const points = Array.from({ length: 160 }, () => ({
+    const points = Array.from({ length: 120 }, () => ({
       x: Math.random() * canvas.width,
       y: Math.random() * canvas.height,
-      vx: (Math.random() - 0.5) * 0.25,
-      vy: -Math.random() * 0.35 - 0.05,
-      r: Math.random() * 1.6 + 0.4,
-      a: Math.random() * 0.35 + 0.05
+      vx: (Math.random() - 0.5) * 0.2,
+      vy: -Math.random() * 0.3 - 0.05,
+      r: Math.random() * 1.4 + 0.3,
+      a: Math.random() * 0.25 + 0.05
     }));
 
     let raf = 0;
@@ -112,101 +93,116 @@ export default function HomeCinematic() {
     };
   }, []);
 
-  const ringStyle = useMemo(
-    () => ({
-      transform: reducedMotion ? "none" : "translateZ(0)",
-      marginLeft: 0,
-      marginRight: 0
-    }),
-    [reducedMotion]
-  );
-
   return (
     <div className="relative min-h-screen bg-black text-white">
       <GradientBackdrop />
-      <section className="relative flex min-h-[100svh] flex-col items-center justify-center overflow-hidden px-6 pb-20 pt-10 text-center">
+      <section className="relative flex min-h-[100svh] flex-col items-center justify-center overflow-hidden px-4 pb-24 pt-8 text-center sm:px-6">
+        {/* Background layers */}
         <div className="pointer-events-none absolute inset-0">
-          <canvas ref={canvasRef} className="absolute inset-0 opacity-70" />
-          <div className="scanline-layer absolute inset-0 opacity-30" />
-          <div className="liquid-orb absolute left-1/2 top-1/2 h-[720px] w-[720px] -translate-x-1/2 -translate-y-1/2 rounded-full" />
-          <div className="absolute inset-0 bg-gradient-to-b from-black/90 via-black/70 to-black/95" />
+          <canvas ref={canvasRef} className="absolute inset-0 opacity-60" />
+          <div className="scanline-layer absolute inset-0 opacity-20" />
+          <div className="liquid-orb absolute left-1/2 top-1/2 h-[600px] w-[600px] -translate-x-1/2 -translate-y-1/2 rounded-full sm:h-[720px] sm:w-[720px]" />
+          <div className="absolute inset-0 bg-gradient-to-b from-black/90 via-black/60 to-black/95" />
         </div>
 
-        <div className="relative z-10 max-w-2xl transition-all duration-700">
+        {/* Header */}
+        <div className="relative z-10 mb-8 max-w-2xl">
           <div
-            className={`text-[0.7rem] uppercase tracking-[0.6em] ${
-              phase === "cta" ? "opacity-0 -translate-y-3" : "opacity-100 translate-y-0"
-            } bg-gradient-to-r from-[#e0c9a0] via-[#bda47a] to-[#7c6a54] bg-clip-text text-transparent transition-all duration-700`}
+            className={`text-[0.65rem] uppercase tracking-[0.6em] transition-all duration-700 sm:text-[0.7rem] ${
+              phase === "cta" ? "opacity-100" : "opacity-60"
+            } bg-gradient-to-r from-[#e0c9a0] via-[#bda47a] to-[#7c6a54] bg-clip-text text-transparent`}
           >
-            NUUL
+            NUUL STUDIO
           </div>
+          <h1
+            className={`mt-4 text-3xl font-semibold tracking-[-0.03em] transition-all duration-700 sm:text-4xl md:text-5xl ${
+              phase === "cta" ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+            }`}
+          >
+            Protect your photos
+          </h1>
+          <p
+            className={`mt-3 text-sm text-white/70 transition-all duration-700 delay-100 sm:text-base ${
+              phase === "cta" ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+            }`}
+          >
+            Strip metadata. Blur sensitive data. Export safely.
+          </p>
         </div>
 
-        <div className="relative z-10 mt-2 flex h-[46vh] w-full max-w-4xl min-h-[280px] max-h-[420px] items-center justify-center">
-          <div className="ring-shell relative h-full w-full">
-            <div
-              ref={ringRef}
-              className={`filter-ring h-full w-full ${
-                phase === "exit" ? "ring-exit" : phase === "cta" ? "ring-hidden" : ""
-              }`}
-              style={ringStyle}
-            >
-            {filters.map((filter, index) => {
-              const phi = Math.acos(-1 + (2 * index) / (filters.length - 1));
-              const theta = Math.PI * (1 + Math.sqrt(5)) * index;
-              const radius = 300;
-              const x = Math.cos(theta) * Math.sin(phi) * radius;
-              const y = Math.sin(theta) * Math.sin(phi) * (radius * 0.55);
-              const z = Math.cos(phi) * radius;
-              const scale = 0.78 + (z / radius + 1) * 0.18;
-              return (
-                <div
-                  key={filter.name}
-                  className="filter-card absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-3xl border border-white/15 bg-white/5 p-4 text-center backdrop-blur"
-                  style={{
-                    ["--card-transform" as "--card-transform"]: `translate3d(${x}px, ${y}px, ${z}px) rotateY(${theta * (180 / Math.PI)}deg) scale(${scale.toFixed(2)})`,
-                    width: `${Math.round(filter.width * scale)}px`,
-                    height: `${Math.round(filter.height * scale)}px`,
-                    animationDelay: `${index * 0.2}s`,
-                    ["--card-color" as "--card-color"]: filter.hue
-                  } as React.CSSProperties}
-                >
-                  <div className="text-sm font-semibold">{filter.name}</div>
-                  <div className="mt-1 text-[0.65rem] text-white/60">{filter.note}</div>
-                  <div className="filter-sheen absolute inset-0 rounded-2xl" />
-                </div>
-              );
-            })}
-            </div>
-          </div>
-        </div>
-
+        {/* Carousel section */}
         <div
-          className={`relative z-10 mt-4 flex w-full flex-col items-center pb-20 text-center transition-all duration-700 ${
+          className={`relative z-10 w-full max-w-3xl transition-all duration-700 ${
+            phase === "carousel" || phase === "cta"
+              ? "opacity-100 translate-y-0"
+              : "opacity-0 translate-y-8"
+          }`}
+        >
+          <div className="mb-4 text-[0.6rem] uppercase tracking-[0.4em] text-white/50 sm:text-[0.65rem]">
+            Choose your protection level
+          </div>
+          <DragCarousel
+            items={filters}
+            selectedId={selectedFilter}
+            onSelect={(id) => {
+              setSelectedFilter(id);
+              playHover();
+            }}
+          />
+        </div>
+
+        {/* CTA section */}
+        <div
+          className={`relative z-10 mt-10 flex flex-col items-center transition-all duration-700 delay-200 ${
             phase === "cta" ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"
           }`}
         >
-          <div
-            className={`mb-5 transition-all duration-700 ${
-              phase === "cta" ? "opacity-100 translate-y-0 scale-100" : "opacity-0 translate-y-4 scale-95"
-            }`}
-          >
-            <div className="text-[0.65rem] uppercase tracking-[0.5em] text-white/60">NUUL STUDIO</div>
-            <h1 className="mt-4 text-4xl font-semibold tracking-[-0.03em] md:text-6xl">Safe Export</h1>
-            <p className="mt-3 text-sm text-white/70 md:text-base">
-              Local-first privacy for screenshots. Filters first, leaks last. No uploads. No accounts.
-            </p>
-            <div className="mt-2 text-[0.7rem] uppercase tracking-[0.4em] text-white/50">Set the mood</div>
-          </div>
           <Link
-            href="/studio?import=1"
+            href={`/studio?preset=${selectedFilter}&import=1`}
             onMouseEnter={() => playHover()}
-            className="rounded-2xl border border-white/30 bg-white/15 px-10 py-4 text-xs uppercase tracking-[0.3em] backdrop-blur transition hover:border-white/70"
+            className="group relative overflow-hidden rounded-2xl border border-white/30 bg-white/10 px-8 py-4 text-xs uppercase tracking-[0.25em] backdrop-blur transition-all hover:border-white/60 hover:bg-white/15 active:scale-[0.98] sm:px-10 sm:tracking-[0.3em]"
           >
-            Upload your image(s)
+            <span className="relative z-10">Upload your images</span>
+            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
           </Link>
-          <div className="mt-6 text-[0.65rem] uppercase tracking-[0.4em] text-white/50">
-            Protect in style
+
+          <div className="mt-6 flex items-center gap-6 text-[0.6rem] uppercase tracking-[0.3em] text-white/40 sm:text-[0.65rem]">
+            <span className="flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500/80" />
+              100% Local
+            </span>
+            <span className="flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500/80" />
+              No uploads
+            </span>
+            <span className="hidden items-center gap-2 sm:flex">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500/80" />
+              No accounts
+            </span>
+          </div>
+        </div>
+
+        {/* Bottom hint */}
+        <div
+          className={`absolute bottom-8 left-0 right-0 text-center transition-all duration-700 ${
+            phase === "cta" ? "opacity-100" : "opacity-0"
+          }`}
+        >
+          <div className="inline-flex items-center gap-2 text-[0.55rem] uppercase tracking-[0.3em] text-white/30 sm:text-[0.6rem]">
+            <span>Swipe to explore</span>
+            <svg
+              className="h-3 w-3 animate-pulse"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M14 5l7 7m0 0l-7 7m7-7H3"
+              />
+            </svg>
           </div>
         </div>
       </section>
