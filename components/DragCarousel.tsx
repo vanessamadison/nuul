@@ -35,6 +35,7 @@ export default function DragCarousel({
   const [velocity, setVelocity] = useState(0);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isMobile, setIsMobile] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const lastX = useRef(0);
   const lastTime = useRef(0);
   const rafRef = useRef<number>(0);
@@ -42,6 +43,7 @@ export default function DragCarousel({
 
   // Detect mobile for responsive sizing
   useEffect(() => {
+    setMounted(true);
     const checkMobile = () => setIsMobile(window.innerWidth < 640);
     checkMobile();
     window.addEventListener("resize", checkMobile);
@@ -309,6 +311,22 @@ export default function DragCarousel({
       cancelAnimationFrame(momentumRef.current);
     };
   }, []);
+
+  // Show placeholder during SSR
+  if (!mounted) {
+    return (
+      <div className={`relative w-full ${className}`}>
+        <div className="flex justify-center gap-4 py-8">
+          {items.slice(0, 3).map((item) => (
+            <div
+              key={item.id}
+              className={`h-[180px] w-[140px] animate-pulse rounded-2xl bg-gradient-to-br opacity-50 ${item.gradient}`}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`relative w-full ${className}`} ref={containerRef}>

@@ -21,7 +21,12 @@ export default function HomeCinematic() {
   const [phase, setPhase] = useState<"intro" | "carousel" | "cta">("intro");
   const [selectedFilter, setSelectedFilter] = useState("graphite");
   const [reducedMotion, setReducedMotion] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -33,7 +38,11 @@ export default function HomeCinematic() {
 
   useEffect(() => {
     const handler = () => {
-      startDrone();
+      try {
+        startDrone();
+      } catch (e) {
+        console.error("[v0] Failed to start drone:", e);
+      }
       window.removeEventListener("pointerdown", handler);
     };
     window.addEventListener("pointerdown", handler, { once: true });
@@ -49,7 +58,7 @@ export default function HomeCinematic() {
   }, []);
 
   useEffect(() => {
-    if (!canvasRef.current) return;
+    if (!mounted || !canvasRef.current) return;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
@@ -91,7 +100,25 @@ export default function HomeCinematic() {
       window.removeEventListener("resize", resize);
       cancelAnimationFrame(raf);
     };
-  }, []);
+  }, [mounted]);
+
+  // SSR placeholder to prevent hydration issues
+  if (!mounted) {
+    return (
+      <div className="relative min-h-screen bg-black text-white">
+        <div className="flex min-h-screen items-center justify-center">
+          <div className="text-center">
+            <div className="text-[0.65rem] uppercase tracking-[0.6em] text-white/60">
+              NUUL STUDIO
+            </div>
+            <div className="mt-4 text-3xl font-semibold text-white/20">
+              Loading...
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative min-h-screen bg-black text-white">
