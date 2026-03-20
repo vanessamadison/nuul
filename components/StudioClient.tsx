@@ -98,11 +98,13 @@ export default function StudioClient() {
   const [showFilterOnboarding, setShowFilterOnboarding] = useState(false);
 
   // Refs
-  const fileRef          = useRef<File | null>(null);
-  const bitmapRef        = useRef<ImageBitmap | null>(null);
-  const analysisScaleRef = useRef<number>(1);
-  const fileInputRef     = useRef<HTMLInputElement | null>(null);
-  const xmpInputRef      = useRef<HTMLInputElement | null>(null);
+  const fileRef              = useRef<File | null>(null);
+  const bitmapRef            = useRef<ImageBitmap | null>(null);
+  const analysisScaleRef     = useRef<number>(1);
+  const fileInputRef         = useRef<HTMLInputElement | null>(null);
+  const xmpInputRef          = useRef<HTMLInputElement | null>(null);
+  // Keep a ref to importedFilters so handleFile can read current state without stale closure
+  const importedFiltersRef   = useRef<FilterItem[]>([]);
 
   // ─── Derived risk level ────────────────────────────────────────────────────
 
@@ -121,18 +123,24 @@ export default function StudioClient() {
     return { high, medium, low };
   }, [findings]);
 
-  // ─── Generate thumbnails when bitmap is loaded ─────────────────────────────
+  // ─── Keep importedFilters ref in sync (avoids stale closure in handleFile) ─
 
-  const generateThumbs = useCallback(async (bitmap: ImageBitmap, items: FilterItem[]) => {
-    const updated = [...items];
-    for (let i = 0; i < updated.length; i++) {
-      updated[i] = {
-        ...updated[i],
-        thumb: await filterThumbnail(bitmap, updated[i].params),
-      };
-      setFilterItems((prev) => {
+  useEffect(() => {
+    importedFiltersRef.current = importedFilters;
+  }, [importedFilters]);
+
+  // ─── Generate thumbnails progressively for any filter item array ────────────
+
+  const generateThumbs = useCallback(async (
+    bitmap: ImageBitmap,
+    items: FilterItem[],
+    setter: React.Dispatch<React.SetStateAction<FilterItem[]>>,
+  ) => {
+    for (let i = 0; i < items.length; i++) {
+      const thumb = await filterThumbnail(bitmap, items[i].params);
+      setter((prev) => {
         const n = [...prev];
-        if (n[i]) n[i] = updated[i];
+        if (n[i]) n[i] = { ...n[i], thumb };
         return n;
       });
     }
@@ -200,11 +208,18 @@ export default function StudioClient() {
       });
 
       // Generate filter strip thumbnails in background
-      const allItems = [
-        ...BUILTIN_FILTERS.map((p) => ({ params: p, thumb: null })),
-      ];
-      setFilterItems(allItems);
-      generateThumbs(bitmap, allItems);
+      // Builtin filters — reset thumbs then regenerate from new image
+      const builtinItems = BUILTIN_FILTERS.map((p) => ({ params: p, thumb: null as string | null }));
+      setFilterItems(builtinItems);
+      void generateThumbs(bitmap, builtinItems, setFilterItems);
+
+      // Imported presets — regenerate from new image if any exist
+      const currentImported = importedFiltersRef.current;
+      if (currentImported.length > 0) {
+        const resetImported = currentImported.map((item) => ({ ...item, thumb: null as string | null }));
+        setImportedFilters(resetImported);
+        void generateThumbs(bitmap, resetImported, setImportedFilters);
+      }
 
       setProcessing(false);
     },
@@ -253,16 +268,34 @@ export default function StudioClient() {
       if (!f.name.toLowerCase().endsWith(".xmp")) continue;
       try {
         const params = await readXMPFile(f);
-        const thumb  = bitmapRef.current
-          ? await filterThumbnail(bitmapRef.current, params)
-          : null;
-        newItems.push({ params, thumb });
+        // Thumbs start null; if a photo is loaded we'll generate below
+        newItems.push({ params, thumb: null });
       } catch (err) {
         console.warn("Failed to parse XMP:", f.name, err);
       }
     }
     if (newItems.length) {
-      setImportedFilters((prev) => [...prev, ...newItems]);
+      setImportedFilters((prev) => {
+        const merged = [...prev, ...newItems];
+        // Kick off thumbnail generation if a photo is already loaded
+        if (bitmapRef.current) {
+          // Generate thumbs for just the new items; use index offset so setter lands correctly
+          const offset = prev.length;
+          const bitmap = bitmapRef.current;
+          (async () => {
+            for (let i = 0; i < newItems.length; i++) {
+              const thumb = await filterThumbnail(bitmap, newItems[i].params);
+              setImportedFilters((p) => {
+                const n = [...p];
+                const idx = offset + i;
+                if (n[idx]) n[idx] = { ...n[idx], thumb };
+                return n;
+              });
+            }
+          })();
+        }
+        return merged;
+      });
       // Auto-select the first imported preset and sync curves/HSL
       const first = newItems[0].params;
       setActiveFilter(first);
@@ -318,7 +351,7 @@ export default function StudioClient() {
       addGrain:    sanitize.addGrain,
       quality:     resolvedFormat === "image/png" ? undefined : exportQuality,
       cropTop,
-      filter:      mergedFilter.name === "None" && curves.rgb === identityCurve ? null : mergedFilter,
+      filter:      mergedFilter,
     });
 
     const exportFile: FileInfo = {
@@ -787,11 +820,33 @@ export default function StudioClient() {
           onExportAsIs={onExportAsIs}
         />
 
-        <GlassPanel className="p-4">
-          <div className="text-xs uppercase tracking-[0.2em] text-[color:var(--muted)]">Privacy note</div>
-          <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-[color:var(--muted)]">
-            Every export re-encodes pixel data only. EXIF, GPS coordinates, device model, thumbnail
-            embeds, and all metadata containers are stripped by construction — not by deletion.
+        <GlassPanel className="p-4 space-y-3">
+          <div className="text-xs uppercase tracking-[0.2em] text-[color:var(--muted)]">What gets stripped</div>
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-2 text-xs text-[color:var(--muted)]">
+            <p className="text-[color:var(--text)] font-medium">Every export — including no filter — strips:</p>
+            <ul className="space-y-1 pl-2">
+              {[
+                "EXIF (camera model, focal length, ISO, shutter speed)",
+                "GPS coordinates, altitude, speed, direction",
+                "Device make, model, serial number, lens ID",
+                "Timestamps (DateTimeOriginal, DateTimeDigitized)",
+                "Embedded JPEG thumbnails stored in the header",
+                "XMP, IPTC, software tags, and ICC color profile",
+              ].map((item) => (
+                <li key={item} className="flex items-start gap-2">
+                  <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400/70" />
+                  {item}
+                </li>
+              ))}
+            </ul>
+            <p className="pt-1 text-[10px] text-[color:var(--muted)] border-t border-white/10">
+              Stripping is architectural — the canvas re-encode has no mechanism to carry metadata,
+              so it cannot survive regardless of filter or format choice.
+            </p>
+            <p className="text-[10px] text-amber-400/80">
+              Not stripped: visual content — faces, text, and QR codes visible in the image.
+              Use the scan tools above to detect and blur them.
+            </p>
           </div>
         </GlassPanel>
 

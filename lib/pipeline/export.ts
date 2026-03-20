@@ -36,7 +36,13 @@ export async function exportSanitized(
   const cropTop = Math.max(0, options.cropTop ?? 0);
   const cropTopScaled = Math.round(cropTop * scale);
 
-  // ─── Step 1: draw bitmap → canvas (also strips all EXIF/GPS/metadata) ───
+  // ─── Step 1: draw bitmap → canvas ────────────────────────────────────────
+  // THIS IS THE STRIPPING STEP. drawImage reads only pixel data from the
+  // ImageBitmap. canvas.toBlob() can only encode pixel data — it has no
+  // mechanism to carry EXIF, GPS, XMP, IPTC, device identifiers, embedded
+  // thumbnails, ICC profiles, or any metadata containers. They cannot survive
+  // this step regardless of format or filter choice.
+  // Stripping is unconditional — it applies to every export, including "None".
   const canvas = document.createElement("canvas");
   canvas.width = targetWidth;
   canvas.height = Math.max(1, targetHeight - cropTopScaled);
