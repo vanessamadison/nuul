@@ -66,12 +66,41 @@ export function playReveal() {
   osc2.stop(audioCtx.currentTime + 0.64);
 }
 
+let sharedAudioCtx: AudioContext | null = null;
 let droneNodes: { osc1: OscillatorNode; osc2: OscillatorNode; gain: GainNode } | null = null;
 
+function getAudioContext() {
+  if (typeof window === "undefined") return null;
+  if (sharedAudioCtx) return sharedAudioCtx;
+  const AudioCtor =
+    window.AudioContext ||
+    (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioCtor) return null;
+  sharedAudioCtx = new AudioCtor();
+  return sharedAudioCtx;
+}
+
+export async function resumeAudio() {
+  const audioCtx = getAudioContext();
+  if (!audioCtx) return;
+  if (audioCtx.state === "suspended") {
+    await audioCtx.resume();
+  }
+}
+
 export function startDrone() {
-  if (typeof window === "undefined") return;
-  if (droneNodes) return;
-  const audioCtx = new (window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext!)();
+  const audioCtx = getAudioContext();
+  if (!audioCtx) return;
+  if (audioCtx.state === "suspended") {
+    void audioCtx.resume();
+  }
+  if (droneNodes) {
+    if (droneNodes.gain.context.state !== "closed") {
+      droneNodes.gain.gain.cancelScheduledValues(audioCtx.currentTime);
+      droneNodes.gain.gain.setValueAtTime(Math.max(droneNodes.gain.gain.value, 0.018), audioCtx.currentTime);
+    }
+    return;
+  }
   const osc1 = audioCtx.createOscillator();
   const osc2 = audioCtx.createOscillator();
   const gain = audioCtx.createGain();

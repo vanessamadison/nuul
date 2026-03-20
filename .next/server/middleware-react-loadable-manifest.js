@@ -1,0 +1,1 @@
+self.__REACT_LOADABLE_MANIFEST="{\"components/ClientRuntime.tsx -> @/lib/pipeline/ocr\":{\"id\":\"components/ClientRuntime.tsx -> @/lib/pipeline/ocr\",\"files\":[\"static/chunks/_app-pages-browser_lib_pipeline_ocr_ts.js\"]}}"

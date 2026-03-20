@@ -8,6 +8,7 @@ export interface CarouselItem {
   label: string;
   image?: string;
   gradient: string;
+  description?: string;
 }
 
 interface DragCarouselProps {
@@ -42,12 +43,29 @@ export default function DragCarousel({
   const momentumRef = useRef<number>(0);
   const autoRotateRef = useRef<NodeJS.Timeout | null>(null);
   const interactionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const physicalIndexRef = useRef(0);
 
   // Responsive card dimensions
   const cardWidth = 130;
   const cardHeight = 175;
   const gap = 14;
   const totalCardWidth = cardWidth + gap;
+  const loopMultiplier = 3;
+  const baseOffset = items.length;
+  const loopedItems = [...items, ...items, ...items];
+
+  const normalizeIndex = useCallback(
+    (index: number) => {
+      if (!items.length) return 0;
+      return ((index % items.length) + items.length) % items.length;
+    },
+    [items.length]
+  );
+
+  const getPhysicalIndex = useCallback(
+    (index: number) => normalizeIndex(index) + baseOffset,
+    [baseOffset, normalizeIndex]
+  );
 
   // Detect mount
   useEffect(() => {
@@ -57,11 +75,9 @@ export default function DragCarousel({
   // Get center position for a card index
   const getCenterPosition = useCallback(
     (index: number) => {
-      if (!containerRef.current) return 0;
-      const containerWidth = containerRef.current.offsetWidth;
-      return index * totalCardWidth - containerWidth / 2 + cardWidth / 2;
+      return index * totalCardWidth;
     },
-    [totalCardWidth, cardWidth]
+    [totalCardWidth]
   );
 
   // Smooth scroll to index
@@ -69,10 +85,12 @@ export default function DragCarousel({
     (index: number, duration = 500) => {
       if (!trackRef.current || !containerRef.current) return;
 
-      const clampedIndex = Math.max(0, Math.min(items.length - 1, index));
-      setCurrentIndex(clampedIndex);
+      const logicalIndex = normalizeIndex(index);
+      const targetPhysicalIndex = getPhysicalIndex(index);
+      setCurrentIndex(logicalIndex);
+      physicalIndexRef.current = targetPhysicalIndex;
 
-      const targetScroll = getCenterPosition(clampedIndex);
+      const targetScroll = getCenterPosition(targetPhysicalIndex);
       const startScroll = trackRef.current.scrollLeft;
       const distance = targetScroll - startScroll;
       const startTime = performance.now();
@@ -93,7 +111,7 @@ export default function DragCarousel({
 
       rafRef.current = requestAnimationFrame(animate);
     },
-    [items.length, getCenterPosition]
+    [getCenterPosition, getPhysicalIndex, normalizeIndex]
   );
 
   // Snap to nearest card
@@ -101,22 +119,18 @@ export default function DragCarousel({
     if (!trackRef.current || !containerRef.current) return;
 
     const currentScroll = trackRef.current.scrollLeft;
-    const containerWidth = containerRef.current.offsetWidth;
-    const centerOffset = currentScroll + containerWidth / 2;
-    const nearestIndex = Math.round(
-      (centerOffset - cardWidth / 2) / totalCardWidth
-    );
-    const clampedIndex = Math.max(0, Math.min(items.length - 1, nearestIndex));
+    const nearestPhysicalIndex = Math.round(currentScroll / totalCardWidth);
+    const logicalIndex = normalizeIndex(nearestPhysicalIndex);
 
     setCurrentIndex((prev) => {
-      if (clampedIndex !== prev && typeof navigator !== "undefined" && "vibrate" in navigator) {
+      if (logicalIndex !== prev && typeof navigator !== "undefined" && "vibrate" in navigator) {
         navigator.vibrate(5);
       }
-      return clampedIndex;
+      return logicalIndex;
     });
 
-    scrollToIndex(clampedIndex, 400);
-  }, [items.length, totalCardWidth, cardWidth, scrollToIndex]);
+    scrollToIndex(logicalIndex, 400);
+  }, [normalizeIndex, totalCardWidth, scrollToIndex]);
 
   // Auto-rotate logic
   useEffect(() => {
@@ -125,7 +139,7 @@ export default function DragCarousel({
     const startAutoRotate = () => {
       autoRotateRef.current = setInterval(() => {
         setCurrentIndex((prev) => {
-          const nextIndex = (prev + 1) % items.length;
+          const nextIndex = normalizeIndex(prev + 1);
           scrollToIndex(nextIndex, 600);
           return nextIndex;
         });
@@ -139,7 +153,7 @@ export default function DragCarousel({
         clearInterval(autoRotateRef.current);
       }
     };
-  }, [autoRotate, autoRotateInterval, items.length, mounted, isInteracting, scrollToIndex]);
+  }, [autoRotate, autoRotateInterval, items.length, mounted, isInteracting, normalizeIndex, scrollToIndex]);
 
   // Handle user interaction pause
   const pauseAutoRotate = useCallback(() => {
@@ -272,11 +286,13 @@ export default function DragCarousel({
       ? items.findIndex((item) => item.id === selectedId)
       : 0;
     const validIndex = Math.max(0, initialIndex);
+    const physicalIndex = getPhysicalIndex(validIndex);
 
     setCurrentIndex(validIndex);
-    const targetScroll = getCenterPosition(validIndex);
+    physicalIndexRef.current = physicalIndex;
+    const targetScroll = getCenterPosition(physicalIndex);
     trackRef.current.scrollLeft = targetScroll;
-  }, [items, selectedId, getCenterPosition, mounted]);
+  }, [items, selectedId, getCenterPosition, getPhysicalIndex, mounted]);
 
   // Handle wheel scroll
   const handleWheel = useCallback(
@@ -312,18 +328,18 @@ export default function DragCarousel({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "ArrowLeft") {
         pauseAutoRotate();
-        const newIndex = Math.max(0, currentIndex - 1);
+        const newIndex = normalizeIndex(currentIndex - 1);
         handleCardClick(newIndex, items[newIndex].id);
       } else if (e.key === "ArrowRight") {
         pauseAutoRotate();
-        const newIndex = Math.min(items.length - 1, currentIndex + 1);
+        const newIndex = normalizeIndex(currentIndex + 1);
         handleCardClick(newIndex, items[newIndex].id);
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [currentIndex, items, handleCardClick, pauseAutoRotate]);
+  }, [currentIndex, items, handleCardClick, normalizeIndex, pauseAutoRotate]);
 
   // Clean up on unmount
   useEffect(() => {
@@ -353,10 +369,6 @@ export default function DragCarousel({
 
   return (
     <div className={`relative w-full ${className}`} ref={containerRef}>
-      {/* Gradient fades */}
-      <div className="pointer-events-none absolute left-0 top-0 z-10 h-full w-8 bg-gradient-to-r from-black to-transparent sm:w-12" />
-      <div className="pointer-events-none absolute right-0 top-0 z-10 h-full w-8 bg-gradient-to-l from-black to-transparent sm:w-12" />
-
       {/* Track */}
       <div
         ref={trackRef}
@@ -366,8 +378,11 @@ export default function DragCarousel({
           msOverflowStyle: "none",
           WebkitOverflowScrolling: "touch",
           cursor: isDragging ? "grabbing" : "grab",
-          paddingLeft: "50%",
-          paddingRight: "50%",
+          paddingLeft: `calc(50% - ${cardWidth / 2}px)`,
+          paddingRight: `calc(50% - ${cardWidth / 2}px)`,
+          maskImage: "linear-gradient(90deg, transparent 0%, rgba(0,0,0,0.5) 8%, black 18%, black 82%, rgba(0,0,0,0.5) 92%, transparent 100%)",
+          WebkitMaskImage:
+            "linear-gradient(90deg, transparent 0%, rgba(0,0,0,0.5) 8%, black 18%, black 82%, rgba(0,0,0,0.5) 92%, transparent 100%)",
         }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -376,24 +391,28 @@ export default function DragCarousel({
         onPointerLeave={handlePointerUp}
       >
         <div className="flex" style={{ gap }}>
-          {items.map((item, index) => {
+          {loopedItems.map((item, index) => {
+            const logicalIndex = normalizeIndex(index);
             const isSelected = selectedId
-              ? item.id === selectedId
-              : index === currentIndex;
-            const distance = Math.abs(index - currentIndex);
+              ? logicalIndex === currentIndex && item.id === selectedId
+              : logicalIndex === currentIndex;
+            const distance = Math.min(
+              Math.abs(logicalIndex - currentIndex),
+              items.length - Math.abs(logicalIndex - currentIndex)
+            );
             const scale = Math.max(0.85, 1 - distance * 0.06);
             const opacity = Math.max(0.5, 1 - distance * 0.12);
 
             return (
               <button
-                key={item.id}
-                onClick={() => handleCardClick(index, item.id)}
+                key={`${item.id}-${index}`}
+                onClick={() => handleCardClick(logicalIndex, item.id)}
                 className={`
-                  group relative flex-shrink-0 overflow-hidden rounded-xl
+                  pixel-card group relative flex-shrink-0 overflow-hidden
                   transition-all duration-300 ease-out
                   ${isSelected
-                    ? "ring-2 ring-white/60 ring-offset-2 ring-offset-black"
-                    : "ring-1 ring-white/20 hover:ring-white/40"
+                    ? "border-cyan-200/80"
+                    : "border-white/15 hover:border-fuchsia-300/45"
                   }
                 `}
                 style={{
@@ -417,12 +436,15 @@ export default function DragCarousel({
                 )}
 
                 {/* Dark overlay for text readability */}
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent" />
+                <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_0%,rgba(5,8,20,0.06)_50%,rgba(5,8,20,0.24)_100%)]" />
+                <div className="absolute inset-x-0 top-0 h-px bg-white/30" />
+                <div className="absolute inset-y-0 left-0 w-px bg-white/20" />
 
                 {/* Shimmer effect */}
                 <div
                   className={`
-                    absolute inset-0 bg-gradient-to-r from-transparent via-white/15 to-transparent
+                    absolute inset-0 bg-gradient-to-r from-transparent via-cyan-200/15 to-transparent
                     translate-x-[-100%] group-hover:translate-x-[100%]
                     transition-transform duration-700 ease-out
                   `}
@@ -430,26 +452,19 @@ export default function DragCarousel({
 
                 {/* Content - just the label */}
                 <div className="relative z-10 flex h-full flex-col justify-end p-3">
-                  <div className="text-sm font-medium text-white drop-shadow-lg">
+                  <div className="truncate text-[0.7rem] font-medium uppercase tracking-[0.08em] text-white drop-shadow-lg sm:text-sm">
                     {item.label}
                   </div>
-
-                  {/* Selection indicator */}
-                  <div
-                    className={`
-                      absolute right-2 top-2 h-2 w-2 rounded-full
-                      transition-all duration-300
-                      ${isSelected
-                        ? "bg-white scale-100 shadow-lg shadow-white/50"
-                        : "bg-white/40 scale-75"
-                      }
-                    `}
-                  />
+                  {item.description ? (
+                    <div className="mt-1 text-[0.56rem] uppercase tracking-[0.2em] text-[#c7d3cb]/70">
+                      {item.description}
+                    </div>
+                  ) : null}
                 </div>
 
                 {/* Glow effect for selected */}
                 {isSelected && (
-                  <div className="absolute inset-0 animate-pulse bg-white/5" />
+                  <div className="absolute inset-0 animate-pulse bg-[#b7c9bd]/6" />
                 )}
               </button>
             );
@@ -464,10 +479,10 @@ export default function DragCarousel({
             key={item.id}
             onClick={() => handleCardClick(index, item.id)}
             className={`
-              h-1 rounded-full transition-all duration-300
+              h-1.5 border border-white/10 transition-all duration-300
               ${index === currentIndex
-                ? "w-6 bg-white/80"
-                : "w-1.5 bg-white/25 hover:bg-white/50"
+                ? "w-6 bg-[#b7c9bd]/80"
+                : "w-1.5 bg-white/18 hover:bg-[#81988a]/45"
               }
             `}
             aria-label={`Go to ${item.label}`}

@@ -1,12 +1,6 @@
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
 import ClientRuntime from "@/components/ClientRuntime";
-
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-inter",
-});
 
 export const metadata: Metadata = {
   title: "NUUL — Protect Your Photos",
@@ -30,7 +24,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" data-theme="dreamy" suppressHydrationWarning>
-      <body className={`${inter.variable} font-sans antialiased`}>
+      <body className="font-sans antialiased">
         <ClientRuntime />
         {children}
       </body>

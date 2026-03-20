@@ -4,17 +4,17 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import GradientBackdrop from "@/components/GradientBackdrop";
 import DragCarousel, { CarouselItem } from "@/components/DragCarousel";
-import { playHover, startDrone } from "@/lib/sfx";
+import { playHover, resumeAudio, startDrone } from "@/lib/sfx";
 
 const filters: CarouselItem[] = [
-  { id: "graphite", label: "Graphite", image: "/images/filters/graphite.jpg", gradient: "from-[#1a1d22] via-[#2c3038] to-[#40444c]" },
-  { id: "warm", label: "Warm Film", image: "/images/filters/warm.jpg", gradient: "from-[#2a1f18] via-[#4c3a2a] to-[#7a604a]" },
-  { id: "soft", label: "Soft Grain", image: "/images/filters/soft.jpg", gradient: "from-[#22202a] via-[#3a3c48] to-[#4d4f58]" },
-  { id: "noir", label: "Noir", image: "/images/filters/noir.jpg", gradient: "from-[#141518] via-[#242830] to-[#363c46]" },
-  { id: "studio", label: "Studio", image: "/images/filters/studio.jpg", gradient: "from-[#1e1a1f] via-[#3a3234] to-[#4a4140]" },
-  { id: "chrome", label: "Chrome", image: "/images/filters/chrome.jpg", gradient: "from-[#182024] via-[#304048] to-[#4a5860]" },
-  { id: "dusk", label: "Dusk", image: "/images/filters/dusk.jpg", gradient: "from-[#1a1824] via-[#36304a] to-[#544a66]" },
-  { id: "ritual", label: "Ritual", image: "/images/filters/ritual.jpg", gradient: "from-[#241e18] via-[#4c3a2a] to-[#6a5040]" },
+  { id: "graphite", label: "Silverline", description: "late coffee", image: "/images/filters/filter-cafe-01.jpg", gradient: "from-[#1a1d22] via-[#2c3038] to-[#40444c]" },
+  { id: "warm", label: "Cornerclub", description: "35mm warm", image: "/images/filters/filter-cafe-02.jpg", gradient: "from-[#2a1f18] via-[#4c3a2a] to-[#7a604a]" },
+  { id: "soft", label: "Afterlight", description: "soft grain", image: "/images/filters/filter-cafe-03.jpg", gradient: "from-[#22202a] via-[#3a3c48] to-[#4d4f58]" },
+  { id: "noir", label: "Midnightrun", description: "city blur", image: "/images/filters/filter-cafe-04.jpg", gradient: "from-[#141518] via-[#242830] to-[#363c46]" },
+  { id: "studio", label: "Loftsunday", description: "clean flash", image: "/images/filters/filter-cafe-05.jpg", gradient: "from-[#1e1a1f] via-[#3a3234] to-[#4a4140]" },
+  { id: "chrome", label: "Basement", description: "chrome edit", image: "/images/filters/filter-cafe-06.jpg", gradient: "from-[#182024] via-[#304048] to-[#4a5860]" },
+  { id: "dusk", label: "Bluehour", description: "soft dusk", image: "/images/filters/filter-cafe-07.jpg", gradient: "from-[#1a1824] via-[#36304a] to-[#544a66]" },
+  { id: "ritual", label: "Vinylnight", description: "muted amber", image: "/images/filters/filter-cafe-08.jpg", gradient: "from-[#241e18] via-[#4c3a2a] to-[#6a5040]" },
 ];
 
 export default function HomeCinematic() {
@@ -37,16 +37,27 @@ export default function HomeCinematic() {
   }, []);
 
   useEffect(() => {
-    const handler = () => {
+    const wakeAudio = () => {
       try {
+        void resumeAudio();
         startDrone();
       } catch {
         // Silent fail
       }
-      window.removeEventListener("pointerdown", handler);
     };
-    window.addEventListener("pointerdown", handler, { once: true });
-    return () => window.removeEventListener("pointerdown", handler);
+    const handleVisibility = () => {
+      if (!document.hidden) wakeAudio();
+    };
+    window.addEventListener("pointerdown", wakeAudio);
+    window.addEventListener("keydown", wakeAudio);
+    window.addEventListener("focus", wakeAudio);
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      window.removeEventListener("pointerdown", wakeAudio);
+      window.removeEventListener("keydown", wakeAudio);
+      window.removeEventListener("focus", wakeAudio);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
   }, []);
 
   useEffect(() => {
@@ -124,28 +135,36 @@ export default function HomeCinematic() {
         {/* Background layers */}
         <div className="pointer-events-none absolute inset-0">
           <canvas ref={canvasRef} className="absolute inset-0 opacity-50" />
-          <div className="scanline-layer absolute inset-0 opacity-10" />
-          <div className="warm-orb absolute left-1/2 top-1/2 h-[500px] w-[500px] -translate-x-1/2 -translate-y-1/2 rounded-full sm:h-[650px] sm:w-[650px]" />
-          <div className="absolute inset-0 bg-gradient-to-b from-black/80 via-black/40 to-black/90" />
+          <div className="scanline-layer absolute inset-0 opacity-[0.08]" />
+          <div className="pixel-grid-overlay absolute inset-0 opacity-70" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(114,181,137,0.14),transparent_32%),radial-gradient(circle_at_78%_22%,rgba(143,164,149,0.12),transparent_24%),radial-gradient(circle_at_20%_80%,rgba(82,114,95,0.12),transparent_22%)]" />
+          <div className="absolute inset-0 bg-gradient-to-b from-[#020202]/74 via-[#090909]/48 to-[#020202]/94" />
         </div>
 
         {/* Beautiful NUUL Hero */}
-        <div className="relative z-10 mb-10 max-w-2xl">
+        <div className="relative z-10 mb-10 flex max-w-2xl flex-col items-center">
+          <div
+            className={`pixel-kicker mb-5 transition-all duration-700 ${
+              phase === "cta" ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+            }`}
+          >
+            LOCAL-FIRST CLEANUP FOR ALL PHOTOS
+          </div>
           <h1
-            className={`hero-text text-5xl font-bold tracking-[0.25em] transition-all duration-1000 sm:text-6xl md:text-7xl ${
+            className={`hero-text text-6xl font-semibold uppercase transition-all duration-1000 sm:text-7xl md:text-8xl ${
               phase === "cta" ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"
             }`}
           >
-            <span className="bg-gradient-to-br from-white via-amber-100 to-amber-200/80 bg-clip-text text-transparent drop-shadow-2xl">
+            <span className="pixel-title-frame px-3 py-1 text-white sm:px-5">
               NUUL
             </span>
           </h1>
           <p
-            className={`mt-5 text-base text-white/80 transition-all duration-700 delay-200 sm:text-lg ${
+            className={`hero-subtitle mt-5 max-w-xl text-sm text-white/72 transition-all duration-700 delay-200 sm:text-base ${
               phase === "cta" ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
             }`}
           >
-            Protect your photos. Strip metadata. Export safely.
+            Stay harder to trace
           </p>
         </div>
 
@@ -178,31 +197,31 @@ export default function HomeCinematic() {
           <Link
             href={`/studio?preset=${selectedFilter}&import=1`}
             onMouseEnter={() => playHover()}
-            className="group relative overflow-hidden rounded-2xl border border-white/40 bg-white/10 px-8 py-4 text-sm font-medium uppercase tracking-[0.2em] text-white backdrop-blur-sm transition-all hover:border-white/70 hover:bg-white/20 active:scale-[0.98] sm:px-12 sm:text-xs sm:tracking-[0.3em]"
+            className="group pixel-cta relative overflow-hidden border border-emerald-300/45 bg-black/35 px-8 py-4 text-sm font-medium uppercase tracking-[0.22em] text-white transition-all hover:border-emerald-200/65 hover:bg-white/10 active:scale-[0.98] sm:px-12 sm:text-xs sm:tracking-[0.3em]"
           >
-            <span className="relative z-10">Upload Your Images</span>
-            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
+            <span className="relative z-10">Upload Photos</span>
+            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-emerald-200/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
           </Link>
 
-          <div className="mt-6 flex items-center gap-5 text-[0.65rem] uppercase tracking-[0.25em] text-white/60 sm:gap-6 sm:text-[0.7rem]">
-            <span className="flex items-center gap-2">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-              100% Local
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-3 text-[0.62rem] uppercase tracking-[0.22em] text-white/60 sm:gap-4 sm:text-[0.7rem]">
+            <span className="pixel-meta-chip flex items-center gap-2">
+              <span className="h-1.5 w-1.5 bg-emerald-400" />
+              strips metadata
             </span>
-            <span className="flex items-center gap-2">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-              No Uploads
+            <span className="pixel-meta-chip flex items-center gap-2">
+              <span className="h-1.5 w-1.5 bg-emerald-200" />
+              flags text and qr
             </span>
           </div>
         </div>
 
         {/* Bottom hint */}
         <div
-          className={`absolute bottom-6 left-0 right-0 text-center transition-all duration-700 ${
+          className={`absolute bottom-10 left-0 right-0 text-center transition-all duration-700 sm:bottom-6 ${
             phase === "cta" ? "opacity-100" : "opacity-0"
           }`}
         >
-          <div className="inline-flex items-center gap-2 text-[0.6rem] uppercase tracking-[0.25em] text-white/40 sm:text-[0.65rem]">
+          <div className="inline-flex items-center gap-2 border border-white/10 bg-black/20 px-3 py-1 text-[0.6rem] uppercase tracking-[0.25em] text-white/40 sm:text-[0.65rem]">
             <span>Swipe to explore</span>
             <svg
               className="h-3 w-3 animate-pulse"
