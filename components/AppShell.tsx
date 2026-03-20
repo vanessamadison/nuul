@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 const navLinks = [
   { href: "/receipts", label: "Receipts" },
@@ -10,44 +10,67 @@ const navLinks = [
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router   = useRouter();
+
+  // Secondary pages (receipts, settings) go back to /studio
+  // Studio goes back to / (home). Anywhere else: browser history.
+  const handleBack = () => {
+    if (pathname === "/receipts" || pathname === "/settings") {
+      router.push("/studio");
+    } else if (pathname === "/studio") {
+      router.push("/");
+    } else if (typeof window !== "undefined" && window.history.length > 2) {
+      router.back();
+    } else {
+      router.push("/");
+    }
+  };
 
   return (
-    <div className="relative min-h-screen px-4 pb-12 pt-6 sm:px-6 lg:px-12">
-      <nav className="mx-auto flex max-w-5xl items-center justify-between">
-        <Link
-          href="/"
-          className="flex items-center gap-2 text-white/60 transition hover:text-white"
+    <div className="relative min-h-screen px-4 pb-12 pt-6 sm:px-6 lg:px-10">
+      {/* Nav — max width centered */}
+      <nav className="mx-auto flex max-w-6xl items-center justify-between">
+        <button
+          onClick={handleBack}
+          className="flex items-center gap-1.5 text-white/45 transition hover:text-white/80"
         >
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
-          <span className="text-[0.65rem] uppercase tracking-[0.2em] sm:text-xs">Back</span>
-        </Link>
+          <span className="text-[0.6rem] uppercase tracking-[0.25em]">Back</span>
+        </button>
 
         <Link
           href="/"
-          className="text-xs font-semibold tracking-[0.4em] text-white/80 transition hover:text-white sm:text-sm"
+          className="text-[0.7rem] font-semibold tracking-[0.45em] text-white/80 transition hover:text-white sm:text-xs"
         >
           NUUL
         </Link>
 
-        <div className="flex items-center gap-3 sm:gap-4">
-          {navLinks.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className={`text-[0.6rem] uppercase tracking-[0.15em] transition sm:text-[0.65rem] sm:tracking-[0.2em] ${
-                pathname === link.href
-                  ? "text-white"
-                  : "text-white/50 hover:text-white/80"
-              }`}
-            >
-              {link.label}
-            </Link>
-          ))}
+        <div className="flex items-center gap-2">
+          {navLinks.map((link) => {
+            const active = pathname === link.href;
+            return (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={`rounded-full border px-3 py-1 text-[0.6rem] uppercase tracking-[0.18em] transition ${
+                  active
+                    ? "border-white/30 bg-white/10 text-white"
+                    : "border-white/10 bg-transparent text-white/45 hover:border-white/20 hover:bg-white/5 hover:text-white/75"
+                }`}
+              >
+                {link.label}
+              </Link>
+            );
+          })}
         </div>
       </nav>
-      <main className="mt-8 sm:mt-10">{children}</main>
+
+      {/* Content — max width centered */}
+      <main className="mx-auto mt-8 max-w-6xl sm:mt-10">
+        {children}
+      </main>
     </div>
   );
 }

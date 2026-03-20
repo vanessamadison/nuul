@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import GradientBackdrop from "@/components/GradientBackdrop";
 import DragCarousel, { CarouselItem } from "@/components/DragCarousel";
-import { playHover, resumeAudio, startDrone } from "@/lib/sfx";
+// sfx removed — AudioContext creation was causing browser errors and slowdowns
 
 const filters: CarouselItem[] = [
   { id: "graphite", label: "Silverline", description: "late coffee", image: "/images/filters/filter-cafe-01.jpg", gradient: "from-[#1a1d22] via-[#2c3038] to-[#40444c]" },
@@ -36,29 +36,6 @@ export default function HomeCinematic() {
     return () => media.removeEventListener("change", handler);
   }, []);
 
-  useEffect(() => {
-    const wakeAudio = () => {
-      try {
-        void resumeAudio();
-        startDrone();
-      } catch {
-        // Silent fail
-      }
-    };
-    const handleVisibility = () => {
-      if (!document.hidden) wakeAudio();
-    };
-    window.addEventListener("pointerdown", wakeAudio);
-    window.addEventListener("keydown", wakeAudio);
-    window.addEventListener("focus", wakeAudio);
-    document.addEventListener("visibilitychange", handleVisibility);
-    return () => {
-      window.removeEventListener("pointerdown", wakeAudio);
-      window.removeEventListener("keydown", wakeAudio);
-      window.removeEventListener("focus", wakeAudio);
-      document.removeEventListener("visibilitychange", handleVisibility);
-    };
-  }, []);
 
   useEffect(() => {
     const timers = [
@@ -181,7 +158,6 @@ export default function HomeCinematic() {
             selectedId={selectedFilter}
             onSelect={(id) => {
               setSelectedFilter(id);
-              playHover();
             }}
             autoRotate={true}
             autoRotateInterval={3500}
@@ -196,7 +172,6 @@ export default function HomeCinematic() {
         >
           <Link
             href={`/studio?preset=${selectedFilter}&import=1`}
-            onMouseEnter={() => playHover()}
             className="group pixel-cta relative overflow-hidden border border-emerald-300/45 bg-black/35 px-8 py-4 text-sm font-medium uppercase tracking-[0.22em] text-white transition-all hover:border-emerald-200/65 hover:bg-white/10 active:scale-[0.98] sm:px-12 sm:text-xs sm:tracking-[0.3em]"
           >
             <span className="relative z-10">Upload Photos</span>

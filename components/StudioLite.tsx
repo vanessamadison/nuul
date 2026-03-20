@@ -42,34 +42,56 @@ export default function StudioLite() {
   const [processing, setProcessing] = useState(false);
   const [findings, setFindings] = useState<ScanFindings | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const bitmapRef = useRef<ImageBitmap | null>(null);
+  const fileInputRef  = useRef<HTMLInputElement | null>(null);
+  const bitmapRef     = useRef<ImageBitmap | null>(null);
+  // Track the active object URL in a ref so we can revoke it without
+  // adding previewUrl to loadFile's dependency array (which caused an
+  // infinite loop: previewUrl change → loadFile recreated → effect fired → repeat)
+  const previewUrlRef = useRef<string | null>(null);
 
   const currentFile = queue[currentIndex] ?? null;
 
-  const loadFile = useCallback(
-    async (file: File) => {
-      setProcessing(true);
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-      const bitmap = await decodeImage(file);
-      bitmapRef.current = bitmap;
-      setPreviewUrl(URL.createObjectURL(file));
-      const { canvas, ctx, width, height, scale } = imageToCanvas(bitmap, 1400);
+  const loadFile = useCallback(async (file: File) => {
+    setProcessing(true);
+    setFindings(null);
+
+    // Revoke previous URL via ref — not state — to avoid stale closure loop
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = null;
+    }
+
+    const bitmap = await decodeImage(file);
+    bitmapRef.current = bitmap;
+
+    const url = URL.createObjectURL(file);
+    previewUrlRef.current = url;
+    setPreviewUrl(url);
+
+    setFileInfo({
+      name:   file.name,
+      type:   file.type,
+      size:   file.size,
+      width:  bitmap.width,
+      height: bitmap.height,
+    });
+
+    // Run scan (OCR is optional — Tesseract assets may not be present)
+    try {
+      const { ctx, width, height } = imageToCanvas(bitmap, 1400);
       const imageData = ctx.getImageData(0, 0, width, height);
-      const ocrText = await ocrClient.recognize(imageData);
+      let ocrText = "";
+      try { ocrText = await ocrClient.recognize(imageData); } catch { /* no Tesseract assets */ }
       const scan = await scanImage(file, imageData, ocrText);
       setFindings(scan);
-      setFileInfo({
-        name: file.name,
-        type: file.type,
-        size: file.size,
-        width: bitmap.width,
-        height: bitmap.height
-      });
-      setProcessing(false);
-    },
-    [previewUrl]
-  );
+    } catch {
+      // Scan failed silently — preview still works
+    }
+
+    setProcessing(false);
+  // loadFile has no state deps — only stable refs and setters
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (currentFile) void loadFile(currentFile);
