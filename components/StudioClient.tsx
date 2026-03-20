@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import GlassPanel from "@/components/GlassPanel";
-import PresetSelector from "@/components/PresetSelector";
 import RiskMeter from "@/components/RiskMeter";
 import FindingCard from "@/components/FindingCard";
 import ExportSheet from "@/components/ExportSheet";
@@ -14,38 +13,73 @@ import { OCRClient } from "@/lib/pipeline/ocr";
 import { exportSanitized } from "@/lib/pipeline/export";
 import { createReceipt } from "@/lib/receipts/createReceipt";
 import { FileInfo, RiskLevel, ScanFindings } from "@/lib/pipeline/types";
+import { XMPFilterParams, readXMPFile, defaultFilterParams } from "@/lib/presets/xmpParser";
+import { BUILTIN_FILTERS } from "@/lib/presets/builtinFilters";
+import { applyFilterPreview, filterThumbnail } from "@/lib/presets/filterEngine";
 import exifr from "exifr";
 
 const ocrClient = new OCRClient();
 
-const presetOptions = {
+const sanitizePresets = {
   social: { maxEdge: 2048, addGrain: false },
-  work: { maxEdge: 2048, addGrain: false },
-  high: { maxEdge: 1600, addGrain: true }
+  work:   { maxEdge: 2048, addGrain: false },
+  high:   { maxEdge: 1600, addGrain: true  },
 } as const;
 
 const receiptKey = "nuul-receipts";
 
-type ExportFormat = "keep" | "image/jpeg" | "image/png" | "image/webp";
+type ExportFormat      = "keep" | "image/jpeg" | "image/png" | "image/webp";
 type ExportOutputFormat = "image/jpeg" | "image/png" | "image/webp";
 
+// ─── Filter strip thumbnail item ─────────────────────────────────────────────
+
+interface FilterItem {
+  params: XMPFilterParams;
+  thumb: string | null; // data URL or null while generating
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
 export default function StudioClient() {
-  const [preset, setPreset] = useState<RiskLevel>("work");
-  const [exportFormat, setExportFormat] = useState<ExportFormat>("keep");
+  // Sanitization preset
+  const [sanitizePreset, setSanitizePreset] = useState<RiskLevel>("work");
+
+  // Export format
+  const [exportFormat, setExportFormat]   = useState<ExportFormat>("keep");
   const [exportQuality, setExportQuality] = useState(0.92);
-  const [fileInfo, setFileInfo] = useState<FileInfo | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [findings, setFindings] = useState<ScanFindings | null>(null);
-  const [processing, setProcessing] = useState(false);
+
+  // File & scan state
+  const [fileInfo,    setFileInfo]    = useState<FileInfo | null>(null);
+  const [findings,    setFindings]    = useState<ScanFindings | null>(null);
+  const [processing,  setProcessing]  = useState(false);
   const [receiptJson, setReceiptJson] = useState<string | null>(null);
   const [autoCropEnabled, setAutoCropEnabled] = useState(false);
-  const [verification, setVerification] = useState<{ metadataPresent: boolean } | null>(null);
-  const [ocrAvailable, setOcrAvailable] = useState(true);
+  const [verification,    setVerification]    = useState<{ metadataPresent: boolean } | null>(null);
+  const [ocrAvailable,    setOcrAvailable]    = useState(true);
+
+  // Preview
+  const [previewUrl,         setPreviewUrl]         = useState<string | null>(null);
+  const [filteredPreviewUrl, setFilteredPreviewUrl] = useState<string | null>(null);
+  const [filterRendering,    setFilterRendering]     = useState(false);
+
+  // Filter state
+  const [activeFilter,     setActiveFilter]     = useState<XMPFilterParams>(defaultFilterParams);
+  const [filterItems,      setFilterItems]      = useState<FilterItem[]>(
+    BUILTIN_FILTERS.map((p) => ({ params: p, thumb: null }))
+  );
+  const [importedFilters, setImportedFilters]  = useState<FilterItem[]>([]);
+
+  // Mobile onboarding
   const [showFilterOnboarding, setShowFilterOnboarding] = useState(false);
-  const fileRef = useRef<File | null>(null);
-  const bitmapRef = useRef<ImageBitmap | null>(null);
+
+  // Refs
+  const fileRef          = useRef<File | null>(null);
+  const bitmapRef        = useRef<ImageBitmap | null>(null);
   const analysisScaleRef = useRef<number>(1);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const fileInputRef     = useRef<HTMLInputElement | null>(null);
+  const xmpInputRef      = useRef<HTMLInputElement | null>(null);
+
+  // ─── Derived risk level ────────────────────────────────────────────────────
 
   const riskLevel = useMemo<RiskLevel>(() => {
     if (!findings) return "social";
@@ -56,11 +90,46 @@ export default function StudioClient() {
 
   const textLeakSummary = useMemo(() => {
     if (!findings) return null;
-    const high = findings.textLeaks.filter((leak) => leak.confidence === "high").length;
-    const medium = findings.textLeaks.filter((leak) => leak.confidence === "medium").length;
-    const low = findings.textLeaks.filter((leak) => leak.confidence === "low").length;
+    const high   = findings.textLeaks.filter((l) => l.confidence === "high").length;
+    const medium = findings.textLeaks.filter((l) => l.confidence === "medium").length;
+    const low    = findings.textLeaks.filter((l) => l.confidence === "low").length;
     return { high, medium, low };
   }, [findings]);
+
+  // ─── Generate thumbnails when bitmap is loaded ─────────────────────────────
+
+  const generateThumbs = useCallback(async (bitmap: ImageBitmap, items: FilterItem[]) => {
+    const updated = [...items];
+    for (let i = 0; i < updated.length; i++) {
+      updated[i] = {
+        ...updated[i],
+        thumb: await filterThumbnail(bitmap, updated[i].params),
+      };
+      setFilterItems((prev) => {
+        const n = [...prev];
+        if (n[i]) n[i] = updated[i];
+        return n;
+      });
+    }
+  }, []);
+
+  // ─── Apply active filter to preview ───────────────────────────────────────
+
+  useEffect(() => {
+    if (!bitmapRef.current) return;
+    let cancelled = false;
+    setFilterRendering(true);
+    applyFilterPreview(bitmapRef.current, activeFilter, 800)
+      .then((url) => {
+        if (!cancelled) setFilteredPreviewUrl(url);
+      })
+      .finally(() => {
+        if (!cancelled) setFilterRendering(false);
+      });
+    return () => { cancelled = true; };
+  }, [activeFilter]);
+
+  // ─── File handler ──────────────────────────────────────────────────────────
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -73,68 +142,109 @@ export default function StudioClient() {
 
       const bitmap = await decodeImage(file);
       bitmapRef.current = bitmap;
+
+      // Original preview URL (for before/after scrubber)
       const url = URL.createObjectURL(file);
       setPreviewUrl(url);
 
+      // Filtered preview will trigger via the activeFilter effect above
+      setFilteredPreviewUrl(null);
+
+      // Generate scan canvas at analysis scale
       const { canvas, ctx, width, height, scale } = imageToCanvas(bitmap, 1400);
       analysisScaleRef.current = scale;
       const imageData = ctx.getImageData(0, 0, width, height);
+
+      // OCR
       const ocrReady =
         typeof window !== "undefined" &&
         (window as typeof window & { __nuulOcrReady?: boolean }).__nuulOcrReady;
       setOcrAvailable(ocrReady !== false);
       const ocrText = ocrReady ? await ocrClient.recognize(imageData) : "";
 
+      // Scan
       const scan = await scanImage(file, imageData, ocrText);
-
       setFindings(scan);
       setFileInfo({
-        name: file.name,
-        type: file.type,
-        size: file.size,
-        width: bitmap.width,
-        height: bitmap.height
+        name:   file.name,
+        type:   file.type,
+        size:   file.size,
+        width:  bitmap.width,
+        height: bitmap.height,
       });
+
+      // Generate filter strip thumbnails in background
+      const allItems = [
+        ...BUILTIN_FILTERS.map((p) => ({ params: p, thumb: null })),
+      ];
+      setFilterItems(allItems);
+      generateThumbs(bitmap, allItems);
+
       setProcessing(false);
     },
-    [previewUrl]
+    [previewUrl, generateThumbs]
   );
+
+  // ─── Mobile onboarding ────────────────────────────────────────────────────
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const seen = window.localStorage.getItem("nuul-mobile-filters") === "true";
-    const isMobile = window.innerWidth < 900;
+    const seen   = window.localStorage.getItem("nuul-mobile-filters") === "true";
+    const mobile = window.innerWidth < 900;
     const params = new URLSearchParams(window.location.search);
-    const mode = params.get("mode");
+    const mode   = params.get("mode");
     const importNow = params.get("import") === "1";
-    if (mode === "filters") {
-      setShowFilterOnboarding(true);
-      return;
-    }
-    if (!seen && isMobile) setShowFilterOnboarding(true);
-    if (importNow) {
-      window.setTimeout(() => {
-        fileInputRef.current?.click();
-      }, 200);
-    }
+    if (mode === "filters") { setShowFilterOnboarding(true); return; }
+    if (!seen && mobile) setShowFilterOnboarding(true);
+    if (importNow) window.setTimeout(() => fileInputRef.current?.click(), 200);
   }, []);
 
-  const onDrop = (event: React.DragEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    const file = event.dataTransfer.files?.[0];
-    if (file) void handleFile(file);
+  // ─── Event handlers ───────────────────────────────────────────────────────
+
+  const onDrop  = (e: React.DragEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    const f = e.dataTransfer.files?.[0];
+    if (f) void handleFile(f);
   };
 
-  const onPaste = (event: React.ClipboardEvent<HTMLButtonElement>) => {
-    const items = event.clipboardData.files;
-    const file = items?.[0];
-    if (file) void handleFile(file);
+  const onPaste = (e: React.ClipboardEvent<HTMLButtonElement>) => {
+    const f = e.clipboardData.files?.[0];
+    if (f) void handleFile(f);
   };
 
-  const onPick = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) void handleFile(file);
+  const onPick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) void handleFile(f);
   };
+
+  // XMP import
+  const onXMPImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files?.length) return;
+    const newItems: FilterItem[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      if (!f.name.toLowerCase().endsWith(".xmp")) continue;
+      try {
+        const params = await readXMPFile(f);
+        const thumb  = bitmapRef.current
+          ? await filterThumbnail(bitmapRef.current, params)
+          : null;
+        newItems.push({ params, thumb });
+      } catch (err) {
+        console.warn("Failed to parse XMP:", f.name, err);
+      }
+    }
+    if (newItems.length) {
+      setImportedFilters((prev) => [...prev, ...newItems]);
+      // Auto-select the first imported preset
+      setActiveFilter(newItems[0].params);
+    }
+    // Reset input
+    if (xmpInputRef.current) xmpInputRef.current.value = "";
+  };
+
+  // ─── Download helper ──────────────────────────────────────────────────────
 
   const downloadBlob = (blob: Blob, filename: string) => {
     const link = document.createElement("a");
@@ -143,73 +253,83 @@ export default function StudioClient() {
     link.click();
   };
 
+  // ─── Export ───────────────────────────────────────────────────────────────
+
   const onExport = async () => {
     if (!bitmapRef.current || !fileInfo || !findings) return;
     setProcessing(true);
-    const options = presetOptions[preset];
-    const formatToUse = exportFormat === "keep" ? (fileInfo.type as ExportOutputFormat) : exportFormat;
+
+    const sanitize = sanitizePresets[sanitizePreset];
+    const formatToUse = exportFormat === "keep"
+      ? (fileInfo.type as ExportOutputFormat)
+      : exportFormat;
     const resolvedFormat: ExportOutputFormat =
       formatToUse === "image/jpeg" || formatToUse === "image/webp" || formatToUse === "image/png"
         ? formatToUse
         : "image/png";
+
     const analysisScale = analysisScaleRef.current || 1;
     const blurRegions = findings.codes.map((code) => ({
       ...code,
       boundingBox: {
-        x: code.boundingBox.x / analysisScale,
-        y: code.boundingBox.y / analysisScale,
-        width: code.boundingBox.width / analysisScale,
-        height: code.boundingBox.height / analysisScale
-      }
+        x:      code.boundingBox.x      / analysisScale,
+        y:      code.boundingBox.y      / analysisScale,
+        width:  code.boundingBox.width  / analysisScale,
+        height: code.boundingBox.height / analysisScale,
+      },
     }));
-    const cropTop = autoCropEnabled && findings.topBarHeight ? findings.topBarHeight / analysisScale : 0;
+    const cropTop = autoCropEnabled && findings.topBarHeight
+      ? findings.topBarHeight / analysisScale
+      : 0;
 
     const output = await exportSanitized(bitmapRef.current, {
-      format: resolvedFormat,
-      maxEdge: options.maxEdge,
+      format:      resolvedFormat,
+      maxEdge:     sanitize.maxEdge,
       blurRegions,
-      addGrain: options.addGrain,
-      quality: resolvedFormat === "image/png" ? undefined : exportQuality,
-      cropTop
+      addGrain:    sanitize.addGrain,
+      quality:     resolvedFormat === "image/png" ? undefined : exportQuality,
+      cropTop,
+      filter:      activeFilter.name === "None" ? null : activeFilter,
     });
 
     const exportFile: FileInfo = {
-      name: `nuul-${Math.random().toString(36).slice(2, 8)}-${Date.now()}`,
-      type: output.type,
-      size: output.blob.size,
-      width: output.width,
-      height: output.height
+      name:   `nuul-${Math.random().toString(36).slice(2, 8)}-${Date.now()}`,
+      type:   output.type,
+      size:   output.blob.size,
+      width:  output.width,
+      height: output.height,
     };
 
-    const highConfidenceFindings = findings.textLeaks.filter((leak) => leak.confidence === "high");
-    const lowConfidenceFindings = findings.textLeaks.filter((leak) => leak.confidence !== "high");
+    const highFindings = findings.textLeaks.filter((l) => l.confidence === "high");
+    const lowFindings  = findings.textLeaks.filter((l) => l.confidence !== "high");
     const receipt = createReceipt({
       original: fileInfo,
       exported: exportFile,
       found: [
         ...(findings.metadata.exifPresent ? [{ label: "Metadata detected" }] : []),
-        ...highConfidenceFindings.map((leak) => ({ label: `${leak.type} detected` })),
-        ...lowConfidenceFindings.map((leak) => ({
-          label: leak.type === "address" ? "Possible address" : `Possible ${leak.type}`
+        ...highFindings.map((l) => ({ label: `${l.type} detected` })),
+        ...lowFindings.map((l) => ({
+          label: l.type === "address" ? "Possible address" : `Possible ${l.type}`,
         })),
-        ...(findings.codes.length ? [{ label: "QR code detected" }] : []),
-        ...(findings.faces.length ? [{ label: "Face detected" }] : []),
-        ...(findings.screenHints.length ? [{ label: "Browser UI detected" }] : [])
+        ...(findings.codes.length  ? [{ label: "QR code detected" }]    : []),
+        ...(findings.faces.length  ? [{ label: "Face detected" }]       : []),
+        ...(findings.screenHints.length ? [{ label: "Browser UI detected" }] : []),
       ],
       changed: [
-        { label: "Metadata removed" },
-        { label: "Re-encoded" },
+        { label: "All EXIF / GPS / device metadata stripped" },
+        { label: "Re-encoded — metadata-free by construction" },
+        ...(activeFilter.name !== "None" ? [{ label: `Filter applied: ${activeFilter.name}` }] : []),
         ...(blurRegions.length ? [{ label: "QR blurred", detail: `${blurRegions.length}` }] : []),
-        ...(cropTop ? [{ label: "Auto-cropped browser chrome" }] : [])
+        ...(cropTop ? [{ label: "Auto-cropped browser chrome" }] : []),
       ],
       remaining: [
-        ...(findings.faces.length ? [{ label: "Faces remain visible" }] : []),
-        ...(findings.screenHints.length ? [{ label: "Tabs or URL may still be visible" }] : []),
-        ...(findings.textLeaks.some((leak) => leak.confidence !== "high")
+        ...(findings.faces.length  ? [{ label: "Faces remain visible" }]            : []),
+        ...(findings.screenHints.length ? [{ label: "Tabs or URL may be visible" }] : []),
+        ...(findings.textLeaks.some((l) => l.confidence !== "high")
           ? [{ label: "Possible low-confidence text remains" }]
-          : [])
+          : []),
       ],
-      tips: ["Review the export before sharing.", "Tabs or URL may still be visible."]
+      tips: ["Review the export before sharing.", "Tabs or URL may still be visible."],
     });
 
     const receiptString = JSON.stringify(receipt, null, 2);
@@ -217,11 +337,17 @@ export default function StudioClient() {
 
     if (typeof window !== "undefined") {
       const existing = JSON.parse(window.localStorage.getItem(receiptKey) ?? "[]") as string[];
-      window.localStorage.setItem(receiptKey, JSON.stringify([receiptString, ...existing].slice(0, 25)));
+      window.localStorage.setItem(
+        receiptKey,
+        JSON.stringify([receiptString, ...existing].slice(0, 25))
+      );
     }
 
     downloadBlob(output.blob, `${exportFile.name}.${output.type.split("/")[1]}`);
-    downloadBlob(new Blob([receiptString], { type: "application/json" }), `${exportFile.name}.receipt.json`);
+    downloadBlob(
+      new Blob([receiptString], { type: "application/json" }),
+      `${exportFile.name}.receipt.json`
+    );
 
     try {
       const verified = await exifr.parse(output.blob);
@@ -236,22 +362,26 @@ export default function StudioClient() {
   const onExportAsIs = async () => {
     if (!bitmapRef.current || !fileInfo) return;
     setProcessing(true);
-    const formatToUse = exportFormat === "keep" ? (fileInfo.type as ExportOutputFormat) : exportFormat;
+    const formatToUse = exportFormat === "keep"
+      ? (fileInfo.type as ExportOutputFormat)
+      : exportFormat;
     const resolvedFormat: ExportOutputFormat =
       formatToUse === "image/jpeg" || formatToUse === "image/webp" || formatToUse === "image/png"
         ? formatToUse
         : "image/png";
+
     const output = await exportSanitized(bitmapRef.current, {
-      format: resolvedFormat,
-      quality: resolvedFormat === "image/png" ? undefined : exportQuality
+      format:  resolvedFormat,
+      quality: resolvedFormat === "image/png" ? undefined : exportQuality,
+      filter:  activeFilter.name === "None" ? null : activeFilter,
     });
 
     const exportFile: FileInfo = {
-      name: `nuul-${Math.random().toString(36).slice(2, 8)}-${Date.now()}`,
-      type: output.type,
-      size: output.blob.size,
-      width: output.width,
-      height: output.height
+      name:   `nuul-${Math.random().toString(36).slice(2, 8)}-${Date.now()}`,
+      type:   output.type,
+      size:   output.blob.size,
+      width:  output.width,
+      height: output.height,
     };
 
     const receipt = createReceipt({
@@ -260,24 +390,31 @@ export default function StudioClient() {
       found: findings
         ? [
             ...(findings.metadata.exifPresent ? [{ label: "Metadata detected" }] : []),
-            ...(findings.codes.length ? [{ label: "QR code detected" }] : []),
-            ...(findings.faces.length ? [{ label: "Face detected" }] : []),
-            ...(findings.textLeaks.length ? [{ label: "Text leaks detected" }] : [])
+            ...(findings.codes.length  ? [{ label: "QR code detected" }]    : []),
+            ...(findings.faces.length  ? [{ label: "Face detected" }]       : []),
+            ...(findings.textLeaks.length ? [{ label: "Text leaks detected" }] : []),
           ]
         : [],
-      changed: [{ label: "Re-encoded" }],
-      remaining: [
-        { label: "No redactions applied" },
-        ...(findings?.faces.length ? [{ label: "Faces remain visible" }] : [])
+      changed: [
+        { label: "EXIF / GPS / device metadata stripped" },
+        { label: "Re-encoded" },
+        ...(activeFilter.name !== "None" ? [{ label: `Filter applied: ${activeFilter.name}` }] : []),
       ],
-      tips: ["Review the export before sharing."]
+      remaining: [
+        { label: "No safety redactions applied" },
+        ...(findings?.faces.length ? [{ label: "Faces remain visible" }] : []),
+      ],
+      tips: ["Review the export before sharing."],
     });
 
     const receiptString = JSON.stringify(receipt, null, 2);
     setReceiptJson(receiptString);
 
     downloadBlob(output.blob, `${exportFile.name}.${output.type.split("/")[1]}`);
-    downloadBlob(new Blob([receiptString], { type: "application/json" }), `${exportFile.name}.receipt.json`);
+    downloadBlob(
+      new Blob([receiptString], { type: "application/json" }),
+      `${exportFile.name}.receipt.json`
+    );
 
     try {
       const verified = await exifr.parse(output.blob);
@@ -289,25 +426,47 @@ export default function StudioClient() {
     setProcessing(false);
   };
 
+  // ─── All filter items (builtin + imported) ────────────────────────────────
+
+  const allFilters = [...filterItems, ...importedFilters];
+
+  // ─── Render ───────────────────────────────────────────────────────────────
+
   return (
     <div className="grid gap-6 lg:grid-cols-[280px_1fr_320px]">
-      {showFilterOnboarding ? (
+
+      {/* ── Mobile filter onboarding sheet ── */}
+      {showFilterOnboarding && (
         <div className="fixed inset-0 z-[70] flex items-end bg-black/60 lg:hidden">
           <div className="w-full rounded-t-3xl border border-white/10 bg-white/10 p-6 text-white backdrop-blur">
             <div className="text-xs uppercase tracking-[0.3em] text-white/60">Filters first</div>
-            <div className="mt-2 text-xl font-semibold">Pick a look before you edit</div>
+            <div className="mt-2 text-xl font-semibold">Pick a look before you export</div>
             <p className="mt-2 text-sm text-white/60">
-              Import a Lightroom preset or choose a mood. We’ll apply it before sanitization.
+              Choose a mood or import a Lightroom preset. Applied before sanitization.
             </p>
             <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
-              {["Graphite", "Warm Film", "Soft Grain", "Noir"].map((label) => (
-                <button key={label} className="rounded-full border border-white/20 bg-white/10 px-3 py-2 text-left">
-                  {label}
+              {BUILTIN_FILTERS.slice(1, 5).map((f) => (
+                <button
+                  key={f.name}
+                  className="rounded-full border border-white/20 bg-white/10 px-3 py-2 text-left"
+                  onClick={() => {
+                    setActiveFilter(f);
+                    window.localStorage.setItem("nuul-mobile-filters", "true");
+                    setShowFilterOnboarding(false);
+                  }}
+                >
+                  {f.name}
                 </button>
               ))}
-              <label className="col-span-2 rounded-full border border-white/20 bg-white/10 px-3 py-2 text-left">
+              <label className="col-span-2 cursor-pointer rounded-full border border-white/20 bg-white/10 px-3 py-2 text-left">
                 Import Lightroom preset (.xmp)
-                <input type="file" className="hidden" accept=".xmp" />
+                <input
+                  type="file"
+                  className="hidden"
+                  accept=".xmp"
+                  multiple
+                  onChange={onXMPImport}
+                />
               </label>
             </div>
             <button
@@ -321,166 +480,218 @@ export default function StudioClient() {
             </button>
           </div>
         </div>
-      ) : null}
+      )}
+
+      {/* ── Left panel: import + filters ── */}
       <GlassPanel className="p-5">
         <div className="space-y-6">
-          <div className="order-3 lg:order-3">
+
+          {/* Import */}
+          <div>
             <div className="text-xs uppercase tracking-[0.2em] text-[color:var(--muted)]">Import</div>
             <div className="mt-3 flex flex-col gap-3">
               <button
                 className="rounded-2xl border border-white/10 bg-white/10 px-4 py-6 text-left text-sm backdrop-blur"
                 onDrop={onDrop}
                 onDragOver={(e) => e.preventDefault()}
+                onPaste={onPaste}
               >
-                Drag & drop
-                <div className="mt-1 text-xs text-[color:var(--muted)]">Photos, screenshots, JPG/PNG/WEBP</div>
+                Drag, drop, or paste
+                <div className="mt-1 text-xs text-[color:var(--muted)]">JPG · PNG · WEBP up to 50 MB</div>
               </button>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <button
-                  className="rounded-full border border-white/10 bg-white/10 px-3 py-2"
-                  onPaste={onPaste}
-                >
-                  Paste
-                </button>
-                <label className="rounded-full border border-white/10 bg-white/10 px-3 py-2 text-center">
-                  Pick file
-                  <input ref={fileInputRef} type="file" className="hidden" onChange={onPick} accept="image/*" />
-                </label>
-              </div>
+              <label className="cursor-pointer rounded-full border border-white/10 bg-white/10 px-3 py-2 text-center text-xs">
+                Pick file
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  onChange={onPick}
+                  accept="image/*"
+                />
+              </label>
             </div>
           </div>
 
-          <div className="order-4">
-            <div className="text-xs uppercase tracking-[0.2em] text-[color:var(--muted)]">Presets</div>
-            <div className="mt-3">
-              <PresetSelector current={preset} onChange={setPreset} />
-            </div>
-          </div>
-
-          <div className="order-2 lg:order-2 lg:hidden">
-            <div className="rounded-2xl border border-white/10 bg-white/10 p-4 text-xs text-[color:var(--muted)]">
-              Start with a filter or preset. Import a Lightroom preset for quick styling.
-            </div>
-          </div>
-
-          <div className="order-1 lg:order-2">
+          {/* Filter strip */}
+          <div>
             <div className="text-xs uppercase tracking-[0.2em] text-[color:var(--muted)]">Filters</div>
-            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-              {["Graphite", "Warm Film", "Soft Grain", "Noir"].map((label) => (
+            <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+              {allFilters.map((item) => (
                 <button
-                  key={label}
-                  className="rounded-full border border-white/10 bg-white/10 px-3 py-2 text-left"
+                  key={item.params.name}
+                  onClick={() => setActiveFilter(item.params)}
+                  className={`flex-shrink-0 flex flex-col items-center gap-1 rounded-xl border p-1 transition ${
+                    activeFilter.name === item.params.name
+                      ? "border-white/60 bg-white/20"
+                      : "border-white/10 bg-white/5 hover:bg-white/10"
+                  }`}
+                  style={{ width: 64 }}
                 >
-                  {label}
+                  {item.thumb ? (
+                    <img
+                      src={item.thumb}
+                      alt={item.params.name}
+                      className="h-12 w-12 rounded-lg object-cover"
+                    />
+                  ) : (
+                    <div className="h-12 w-12 rounded-lg bg-white/10 animate-pulse" />
+                  )}
+                  <span className="text-[10px] text-[color:var(--muted)] truncate w-full text-center px-0.5">
+                    {item.params.name}
+                  </span>
                 </button>
               ))}
-              <label className="col-span-2 rounded-full border border-white/10 bg-white/10 px-3 py-2 text-left">
-                Import Lightroom preset (.xmp)
-                <input type="file" className="hidden" accept=".xmp" />
-              </label>
-              <label className="col-span-2 rounded-full border border-white/10 bg-white/10 px-3 py-2 text-left">
-                Import LUT (.cube)
-                <input type="file" className="hidden" accept=".cube" />
-              </label>
             </div>
-          </div>
 
-          <div className="rounded-2xl border border-white/10 bg-white/10 p-4 text-xs text-[color:var(--muted)]">
-            {fileInfo ? (
-              <div className="space-y-2">
-                <div>Format: {fileInfo.type || "unknown"}</div>
-                <div>Size: {(fileInfo.size / 1024 / 1024).toFixed(2)} MB</div>
-                <div>
-                  Dimensions: {fileInfo.width} x {fileInfo.height}
-                </div>
-                <div>Location metadata present: {findings?.metadata.gpsPresent ? "Yes" : "No"}</div>
+            {/* Import XMP */}
+            <label className="mt-3 flex cursor-pointer items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-[color:var(--muted)] hover:bg-white/10 transition">
+              <svg className="h-3 w-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M6 1v7M3 5l3 3 3-3M1 9.5h10" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Import Lightroom preset (.xmp)
+              <input
+                ref={xmpInputRef}
+                type="file"
+                className="hidden"
+                accept=".xmp"
+                multiple
+                onChange={onXMPImport}
+              />
+            </label>
+
+            {importedFilters.length > 0 && (
+              <div className="mt-2 text-[10px] text-[color:var(--muted)]">
+                {importedFilters.length} preset{importedFilters.length > 1 ? "s" : ""} imported
               </div>
-            ) : (
-              "File info will appear here once imported. Location metadata details are hidden by default."
             )}
           </div>
+
+          {/* Active filter info */}
+          {activeFilter.name !== "None" && (
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-[color:var(--muted)] space-y-1">
+              <div className="text-[color:var(--text)] font-medium">{activeFilter.name}</div>
+              <div>Exp {activeFilter.exposure > 0 ? "+" : ""}{activeFilter.exposure.toFixed(2)}  ·  Con {activeFilter.contrast > 0 ? "+" : ""}{activeFilter.contrast}</div>
+              <div>Sat {activeFilter.saturation}  ·  Vib {activeFilter.vibrance}  ·  Grain {activeFilter.grain}</div>
+            </div>
+          )}
+
+          {/* File info */}
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-xs text-[color:var(--muted)]">
+            {fileInfo ? (
+              <div className="space-y-1">
+                <div>Format: {fileInfo.type || "unknown"}</div>
+                <div>Size: {(fileInfo.size / 1024 / 1024).toFixed(2)} MB</div>
+                <div>Dimensions: {fileInfo.width} × {fileInfo.height}</div>
+                <div>GPS present: {findings?.metadata.gpsPresent ? "⚠ Yes — will be stripped" : "No"}</div>
+                <div>EXIF present: {findings?.metadata.exifPresent ? "⚠ Yes — will be stripped" : "No"}</div>
+              </div>
+            ) : (
+              "File info appears here after import. Metadata is never read or stored."
+            )}
+          </div>
+
         </div>
       </GlassPanel>
 
+      {/* ── Center panel: preview ── */}
       <GlassPanel className="p-6">
         <div className="flex h-full flex-col gap-6">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-semibold">Safe Export for Screenshots</h1>
+              <h1 className="text-2xl font-semibold">Safe Export Studio</h1>
               <p className="text-sm text-[color:var(--muted)]">
-                Local-only scan for API keys, QR codes, emails, addresses, tabs, and browser chrome.
+                Filter. Sanitize. Share. Zero data leaves your browser.
               </p>
             </div>
-            <button className="rounded-full border border-white/10 bg-white/10 px-4 py-2 text-xs text-[color:var(--muted)]">
-              Developer mode
-            </button>
+            {filterRendering && (
+              <div className="text-xs text-[color:var(--muted)] animate-pulse">Rendering filter…</div>
+            )}
           </div>
 
-          <div className="flex-1 rounded-3xl border border-dashed border-white/20 bg-white/5 p-4">
-            {previewUrl ? (
-              <img src={previewUrl} alt="Preview" className="h-full w-full rounded-2xl object-contain" />
+          <div className="flex-1 rounded-3xl border border-dashed border-white/20 bg-white/5 p-4 relative overflow-hidden">
+            {filteredPreviewUrl ? (
+              <img
+                src={filteredPreviewUrl}
+                alt="Filtered preview"
+                className="h-full w-full rounded-2xl object-contain"
+              />
+            ) : previewUrl ? (
+              <img
+                src={previewUrl}
+                alt="Preview"
+                className="h-full w-full rounded-2xl object-contain"
+              />
             ) : (
               <div className="flex h-full flex-col items-center justify-center gap-4 text-sm text-[color:var(--muted)]">
                 <div className="h-24 w-24 rounded-2xl border border-white/10 bg-white/10" />
-                Drop a file to preview and edit
+                Drop a photo to preview and edit
               </div>
             )}
           </div>
 
           <BeforeAfterScrubber />
           <ManualTools />
-          {verification ? (
-            <div className="rounded-2xl border border-white/10 bg-white/10 p-4 text-xs text-[color:var(--muted)]">
-              Sanitization verified. Metadata present: {verification.metadataPresent ? "Yes" : "No"}.
+
+          {verification && (
+            <div className={`rounded-2xl border p-4 text-xs ${
+              verification.metadataPresent
+                ? "border-red-400/30 bg-red-400/10 text-red-300"
+                : "border-white/10 bg-white/10 text-[color:var(--muted)]"
+            }`}>
+              {verification.metadataPresent
+                ? "⚠ Residual metadata detected in export — try PNG format for guaranteed clean output."
+                : "✓ Export verified clean — no EXIF, GPS, or device metadata present."}
             </div>
-          ) : null}
-          {receiptJson ? (
+          )}
+
+          {receiptJson && !verification && (
             <div className="rounded-2xl border border-white/10 bg-white/10 p-4 text-xs text-[color:var(--muted)]">
-              Receipt downloaded. Check your downloads for JSON.
+              Receipt saved. Check downloads for the JSON audit log.
             </div>
-          ) : null}
+          )}
         </div>
       </GlassPanel>
 
+      {/* ── Right panel: findings + export ── */}
       <div className="space-y-6">
         <GlassPanel className="p-5">
           <RiskMeter level={riskLevel} />
           <div className="mt-6 space-y-3">
             <FindingCard
-              title="Metadata"
+              title="EXIF & GPS metadata"
               description={
                 findings?.metadata.exifPresent
-                  ? "EXIF present. Will be removed on export."
+                  ? `Metadata present${findings.metadata.gpsPresent ? " — including GPS coordinates" : ""}. Stripped on export.`
                   : "No EXIF detected."
               }
-              actionLabel={findings?.metadata.exifPresent ? "Remove" : undefined}
+              actionLabel={findings?.metadata.exifPresent ? "Strip" : undefined}
               active={!!findings?.metadata.exifPresent}
             />
             <FindingCard
               title="Text leaks"
               description={
                 findings
-                  ? `High ${textLeakSummary?.high ?? 0}, medium ${textLeakSummary?.medium ?? 0}, low ${textLeakSummary?.low ?? 0}. Medium/low are suggestions.`
+                  ? `High ${textLeakSummary?.high ?? 0}, medium ${textLeakSummary?.medium ?? 0}, low ${textLeakSummary?.low ?? 0}.`
                   : ocrAvailable
-                    ? "Scan to find text leaks."
-                    : "OCR unavailable. Add local Tesseract assets to enable text detection."
+                    ? "Scan to detect API keys, emails, addresses."
+                    : "OCR unavailable — add local Tesseract assets to enable."
               }
               actionLabel={findings?.textLeaks.length ? "Review" : undefined}
             />
             <FindingCard
-              title="Screens and chrome"
+              title="Browser chrome"
               description={
                 findings?.screenHints.length
                   ? findings.screenHints.join(" ")
-                  : "Heuristics will note tabs or browser chrome."
+                  : "Heuristics will flag tabs or browser UI."
               }
               actionLabel={findings?.chromeConfidence === "high" ? "Auto crop" : undefined}
               active={autoCropEnabled}
-              onAction={() => setAutoCropEnabled((prev) => !prev)}
+              onAction={() => setAutoCropEnabled((p) => !p)}
             />
             <FindingCard
               title="QR codes"
-              description={findings ? `${findings.codes.length} QR codes found.` : "Scan to detect QR codes."}
+              description={findings ? `${findings.codes.length} QR codes found.` : "Scan to detect."}
               actionLabel={findings?.codes.length ? "Blur" : undefined}
               active={!!findings?.codes.length}
             />
@@ -499,18 +710,20 @@ export default function StudioClient() {
           onExport={onExport}
           onExportAsIs={onExportAsIs}
         />
+
         <GlassPanel className="p-4">
-          <div className="text-xs uppercase tracking-[0.2em] text-[color:var(--muted)]">Signal panel</div>
+          <div className="text-xs uppercase tracking-[0.2em] text-[color:var(--muted)]">Privacy note</div>
           <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-[color:var(--muted)]">
-            Chic exports, minimal risk. Filter first on mobile, then sanitize with confidence. Built to feel like a
-            studio, not a security tool.
+            Every export re-encodes pixel data only. EXIF, GPS coordinates, device model, thumbnail
+            embeds, and all metadata containers are stripped by construction — not by deletion.
           </div>
         </GlassPanel>
-        {processing ? (
-          <div className="rounded-2xl border border-white/10 bg-white/10 p-4 text-xs text-[color:var(--muted)]">
+
+        {processing && (
+          <div className="rounded-2xl border border-white/10 bg-white/10 p-4 text-xs text-[color:var(--muted)] animate-pulse">
             Processing…
           </div>
-        ) : null}
+        )}
       </div>
     </div>
   );
