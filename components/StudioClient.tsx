@@ -7,6 +7,7 @@ import FindingCard from "@/components/FindingCard";
 import ExportSheet from "@/components/ExportSheet";
 import BeforeAfterScrubber from "@/components/BeforeAfterScrubber";
 import ManualTools from "@/components/ManualTools";
+import ManualRedactCanvas, { ManualTool, ManualRegion } from "@/components/ManualRedactCanvas";
 import { decodeImage, imageToCanvas } from "@/lib/pipeline/image";
 import { scanImage } from "@/lib/pipeline/scan";
 import { OCRClient } from "@/lib/pipeline/ocr";
@@ -60,6 +61,11 @@ export default function StudioClient() {
   const [verification,    setVerification]    = useState<{ metadataPresent: boolean } | null>(null);
   const [ocrAvailable,    setOcrAvailable]    = useState(true);
   const [exported,        setExported]        = useState(false);
+
+  // Manual redaction
+  const [activeTool,    setActiveTool]    = useState<ManualTool>("none");
+  const [manualRegions, setManualRegions] = useState<ManualRegion[]>([]);
+  const [brushSize,     setBrushSize]     = useState(52);
 
   // Preview
   const [previewUrl,         setPreviewUrl]         = useState<string | null>(null);
@@ -166,6 +172,8 @@ export default function StudioClient() {
       setReceiptJson(null);
       setVerification(null);
       setExported(false);
+      setManualRegions([]);
+      setActiveTool("none");
       fileRef.current = file;
       if (previewUrl) URL.revokeObjectURL(previewUrl);
 
@@ -310,6 +318,30 @@ export default function StudioClient() {
     link.click();
   };
 
+  // ─── Auto-apply scan findings as manual redaction regions ────────────────
+
+  const onAutoApply = useCallback(() => {
+    if (!findings || !bitmapRef.current) return;
+    const { width: iW, height: iH } = bitmapRef.current;
+    const newRegions: ManualRegion[] = [
+      ...findings.faces.map((f) => ({
+        x: f.boundingBox.x / iW,
+        y: f.boundingBox.y / iH,
+        w: f.boundingBox.width  / iW,
+        h: f.boundingBox.height / iH,
+      })),
+      ...findings.codes.map((c) => ({
+        x: c.boundingBox.x / iW,
+        y: c.boundingBox.y / iH,
+        w: c.boundingBox.width  / iW,
+        h: c.boundingBox.height / iH,
+      })),
+    ];
+    if (newRegions.length) {
+      setManualRegions((prev) => [...prev, ...newRegions]);
+    }
+  }, [findings]);
+
   // ─── Export ───────────────────────────────────────────────────────────────
 
   const onExport = async () => {
@@ -326,8 +358,7 @@ export default function StudioClient() {
         : "image/png";
 
     const analysisScale = analysisScaleRef.current || 1;
-    const blurRegions = findings.codes.map((code) => ({
-      ...code,
+    const autoBlurRegions = findings.codes.map((code) => ({
       boundingBox: {
         x:      code.boundingBox.x      / analysisScale,
         y:      code.boundingBox.y      / analysisScale,
@@ -335,6 +366,18 @@ export default function StudioClient() {
         height: code.boundingBox.height / analysisScale,
       },
     }));
+    // Manual redaction regions: convert normalized (0–1) → bitmap pixel coords
+    const iW = bitmapRef.current.width, iH = bitmapRef.current.height;
+    const manualBlurRegions = manualRegions.map((r) => ({
+      boundingBox: {
+        x:      r.x * iW,
+        y:      r.y * iH,
+        width:  r.w * iW,
+        height: r.h * iH,
+      },
+    }));
+    const blurRegions = [...autoBlurRegions, ...manualBlurRegions];
+
     const cropTop = autoCropEnabled && findings.topBarHeight
       ? findings.topBarHeight / analysisScale
       : 0;
@@ -376,7 +419,8 @@ export default function StudioClient() {
         { label: "All EXIF / GPS / device metadata stripped" },
         { label: "Re-encoded — metadata-free by construction" },
         ...(activeFilter.name !== "None" ? [{ label: `Filter applied: ${activeFilter.name}` }] : []),
-        ...(blurRegions.length ? [{ label: "QR blurred", detail: `${blurRegions.length}` }] : []),
+        ...(autoBlurRegions.length ? [{ label: "QR auto-blurred", detail: `${autoBlurRegions.length}` }] : []),
+        ...(manualBlurRegions.length ? [{ label: "Manual redactions applied", detail: `${manualBlurRegions.length}` }] : []),
         ...(cropTop ? [{ label: "Auto-cropped browser chrome" }] : []),
       ],
       remaining: [
@@ -428,10 +472,19 @@ export default function StudioClient() {
         ? formatToUse
         : "image/png";
 
+    // Include manual redaction regions even in quick-export
+    const iW2 = bitmapRef.current.width, iH2 = bitmapRef.current.height;
+    const manualBlurRegions2 = manualRegions.map((r) => ({
+      boundingBox: {
+        x: r.x * iW2, y: r.y * iH2, width: r.w * iW2, height: r.h * iH2,
+      },
+    }));
+
     const output = await exportSanitized(bitmapRef.current, {
-      format:  resolvedFormat,
-      quality: resolvedFormat === "image/png" ? undefined : exportQuality,
-      filter:  mergedFilter,
+      format:      resolvedFormat,
+      quality:     resolvedFormat === "image/png" ? undefined : exportQuality,
+      filter:      mergedFilter,
+      blurRegions: manualBlurRegions2.length ? manualBlurRegions2 : undefined,
     });
 
     const exportFile: FileInfo = {
@@ -716,12 +769,39 @@ export default function StudioClient() {
             )}
           </div>
 
-          {/* Before / After scrubber fills the preview area */}
-          <div className="flex-1 rounded-3xl border border-white/10 bg-white/5 overflow-hidden" style={{ minHeight: 260 }}>
-            <BeforeAfterScrubber before={previewUrl} after={filteredPreviewUrl} />
+          {/* Before / After scrubber + manual redaction canvas overlay */}
+          <div
+            className="relative flex-1 rounded-3xl border border-white/10 bg-white/5 overflow-hidden"
+            style={{ minHeight: 260 }}
+          >
+            {/* The scrubber is pointer-events-none while a tool is active */}
+            <div
+              className="absolute inset-0"
+              style={{ pointerEvents: activeTool !== "none" ? "none" : "auto" }}
+            >
+              <BeforeAfterScrubber before={previewUrl} after={filteredPreviewUrl} />
+            </div>
+
+            {/* Canvas overlay — always rendered so committed regions show */}
+            <ManualRedactCanvas
+              activeTool={activeTool}
+              bitmap={bitmapRef.current}
+              regions={manualRegions}
+              onAddRegion={(r) => setManualRegions((prev) => [...prev, r])}
+              brushSize={brushSize}
+            />
           </div>
 
-          <ManualTools />
+          <ManualTools
+            activeTool={activeTool}
+            onToolChange={setActiveTool}
+            brushSize={brushSize}
+            onBrushSize={setBrushSize}
+            regionCount={manualRegions.length}
+            onClearAll={() => setManualRegions([])}
+            onAutoApply={onAutoApply}
+            hasImage={!!bitmapRef.current}
+          />
 
           {receiptJson && !verification && (
             <div className="rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-[10px] text-[color:var(--muted)]">

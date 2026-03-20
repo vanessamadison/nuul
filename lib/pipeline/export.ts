@@ -1,13 +1,17 @@
 import { canvasToBlob } from "@/lib/pipeline/image";
-import { CodeFinding } from "@/lib/pipeline/types";
 import { XMPFilterParams } from "@/lib/presets/xmpParser";
 import { applyFilterToCanvas } from "@/lib/presets/filterEngine";
+
+// Generic blur region — accepts both auto-detected findings and manual rects
+export interface BlurRect {
+  boundingBox: { x: number; y: number; width: number; height: number };
+}
 
 export interface ExportOptions {
   format: "image/jpeg" | "image/png" | "image/webp";
   quality?: number;
   maxEdge?: number;
-  blurRegions?: CodeFinding[];
+  blurRegions?: BlurRect[];
   addGrain?: boolean;
   cropTop?: number;
   filter?: XMPFilterParams | null;
