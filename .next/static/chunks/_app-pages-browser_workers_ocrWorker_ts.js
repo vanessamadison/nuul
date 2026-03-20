@@ -377,7 +377,7 @@ module.exports = /*#__PURE__*/JSON.parse('{"name":"tesseract.js","version":"5.1.
 /******/ 	
 /******/ 	/* webpack/runtime/getFullHash */
 /******/ 	!function() {
-/******/ 		__webpack_require__.h = function() { return "afa6274e8b51d316"; }
+/******/ 		__webpack_require__.h = function() { return "c295bbc53c04729a"; }
 /******/ 	}();
 /******/ 	
 /******/ 	/* webpack/runtime/global */

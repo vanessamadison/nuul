@@ -23,6 +23,16 @@ const hardContrastCurve: ToneCurve = {
 const matteCurve: ToneCurve = {
   points: [[0, 0.06], [0.3, 0.32], [0.7, 0.7], [1, 0.94]],
 };
+// Additional curves for new presets
+const fadedCurve: ToneCurve = {
+  points: [[0, 0.08], [0.25, 0.28], [0.5, 0.5], [0.75, 0.72], [1, 0.88]],
+};
+const liftCurve: ToneCurve = {
+  points: [[0, 0.12], [0.3, 0.36], [0.6, 0.62], [1, 0.92]],
+};
+const deepShadowCurve: ToneCurve = {
+  points: [[0, 0], [0.15, 0.06], [0.5, 0.5], [0.85, 0.88], [1, 1]],
+};
 
 export const BUILTIN_FILTERS: XMPFilterParams[] = [
   {
@@ -168,5 +178,175 @@ export const BUILTIN_FILTERS: XMPFilterParams[] = [
     toneCurveGreen: identityCurve,
     toneCurveBlue: identityCurve,
     hsl: defaultHSL,
+  },
+
+  // ── New aesthetic presets ─────────────────────────────────────────────────
+
+  {
+    // Faded: lifted matte blacks, desaturated + cool — 90s magazine feel
+    name: "Faded",
+    exposure: 0.05, contrast: -18,
+    highlights: -8, shadows: 35, whites: -5, blacks: 20,
+    temperature: 6000, tint: -4,
+    vibrance: -22, saturation: -15,
+    clarity: -8, dehaze: 0,
+    vignette: -12, grain: 32, sharpening: 12,
+    toneCurve: fadedCurve,
+    toneCurveRed: identityCurve,
+    toneCurveGreen: { points: [[0, 0.02], [0.5, 0.5], [1, 0.97]] },
+    toneCurveBlue: { points: [[0, 0.06], [0.5, 0.52], [1, 0.98]] },
+    hsl: {
+      ...defaultHSL,
+      red:    { hue: 0,  saturation: -12, luminance:  0 },
+      orange: { hue: 0,  saturation: -18, luminance:  5 },
+      green:  { hue: 0,  saturation: -25, luminance: -5 },
+    },
+  },
+
+  {
+    // Mocha: warm brown tones, lifted midtones, cafe window light
+    name: "Mocha",
+    exposure: 0.05, contrast: 14,
+    highlights: -15, shadows: 25, whites: 8, blacks: 6,
+    temperature: 7800, tint: 8,
+    vibrance: 12, saturation: 10,
+    clarity: 6, dehaze: 0,
+    vignette: -20, grain: 16, sharpening: 22,
+    toneCurve: filmCurve,
+    toneCurveRed: { points: [[0, 0.04], [0.5, 0.54], [1, 1]] },
+    toneCurveGreen: { points: [[0, 0.01], [0.5, 0.50], [1, 0.96]] },
+    toneCurveBlue: { points: [[0, 0], [0.5, 0.44], [1, 0.88]] },
+    hsl: {
+      ...defaultHSL,
+      orange: { hue:  6, saturation: 22, luminance: 8  },
+      yellow: { hue:  4, saturation: 18, luminance: 4  },
+      red:    { hue:  8, saturation: 15, luminance: 0  },
+    },
+  },
+
+  {
+    // Vapor: lo-fi pastel — cool blue/lavender, low contrast, dreamy
+    name: "Vapor",
+    exposure: 0.2, contrast: -20,
+    highlights: -18, shadows: 40, whites: 5, blacks: 18,
+    temperature: 5400, tint: 10,
+    vibrance: 25, saturation: 12,
+    clarity: -15, dehaze: 0,
+    vignette: -15, grain: 20, sharpening: 8,
+    toneCurve: liftCurve,
+    toneCurveRed: { points: [[0, 0.04], [0.5, 0.50], [1, 0.95]] },
+    toneCurveGreen: { points: [[0, 0.03], [0.5, 0.51], [1, 0.97]] },
+    toneCurveBlue: { points: [[0, 0.10], [0.5, 0.58], [1, 1]] },
+    hsl: {
+      ...defaultHSL,
+      blue:   { hue: -8,  saturation: 28, luminance:  8 },
+      purple: { hue: 10,  saturation: 32, luminance:  6 },
+      aqua:   { hue: -5,  saturation: 20, luminance:  4 },
+    },
+  },
+
+  {
+    // Golden Hour: rich amber/gold shadows, punchy highlights, sunset feel
+    name: "Golden Hour",
+    exposure: 0.1, contrast: 20,
+    highlights: -22, shadows: 28, whites: 12, blacks: 4,
+    temperature: 9200, tint: 14,
+    vibrance: 38, saturation: 28,
+    clarity: 10, dehaze: 5,
+    vignette: -28, grain: 6, sharpening: 28,
+    toneCurve: softSCurve,
+    toneCurveRed: { points: [[0, 0.03], [0.5, 0.55], [1, 1]] },
+    toneCurveGreen: { points: [[0, 0.01], [0.5, 0.50], [1, 0.97]] },
+    toneCurveBlue: { points: [[0, 0], [0.5, 0.42], [1, 0.85]] },
+    hsl: {
+      ...defaultHSL,
+      red:    { hue:  8,  saturation: 25, luminance:  5 },
+      orange: { hue: 10,  saturation: 35, luminance: 10 },
+      yellow: { hue:  5,  saturation: 28, luminance:  8 },
+    },
+  },
+
+  {
+    // Ice: crisp blue-white, airy + clean, cold clarity
+    name: "Ice",
+    exposure: 0.3, contrast: -8,
+    highlights: -10, shadows: 22, whites: 18, blacks: 8,
+    temperature: 4800, tint: -8,
+    vibrance: 15, saturation: -8,
+    clarity: 5, dehaze: 8,
+    vignette: -6, grain: 0, sharpening: 38,
+    toneCurve: softSCurve,
+    toneCurveRed: { points: [[0, 0], [0.5, 0.48], [1, 0.96]] },
+    toneCurveGreen: { points: [[0, 0.01], [0.5, 0.50], [1, 0.98]] },
+    toneCurveBlue: { points: [[0, 0.06], [0.5, 0.55], [1, 1]] },
+    hsl: {
+      ...defaultHSL,
+      blue:   { hue: -5, saturation: 18, luminance: 10 },
+      aqua:   { hue: -3, saturation: 12, luminance:  8 },
+    },
+  },
+
+  {
+    // Kelp: desaturated olive-green, earthy + organic, documentary feel
+    name: "Kelp",
+    exposure: -0.05, contrast: 18,
+    highlights: -20, shadows: 10, whites: -5, blacks: -8,
+    temperature: 6600, tint: 8,
+    vibrance: -28, saturation: -35,
+    clarity: 14, dehaze: 0,
+    vignette: -18, grain: 24, sharpening: 28,
+    toneCurve: sCurve,
+    toneCurveRed: { points: [[0, 0.01], [0.5, 0.50], [1, 0.97]] },
+    toneCurveGreen: { points: [[0, 0.02], [0.5, 0.52], [1, 0.98]] },
+    toneCurveBlue: { points: [[0, 0], [0.5, 0.46], [1, 0.90]] },
+    hsl: {
+      ...defaultHSL,
+      green:  { hue:  8, saturation: -30, luminance: -10 },
+      yellow: { hue:  5, saturation: -22, luminance:  -5 },
+      aqua:   { hue: -5, saturation: -25, luminance:   0 },
+    },
+  },
+
+  {
+    // Ritual Night: deep shadow, crimson shift, high vignette — sacred/dark
+    name: "Ritual Night",
+    exposure: -0.4, contrast: 35,
+    highlights: -40, shadows: -18, whites: -10, blacks: -28,
+    temperature: 6800, tint: 8,
+    vibrance: 20, saturation: 15,
+    clarity: 20, dehaze: 0,
+    vignette: -60, grain: 28, sharpening: 30,
+    toneCurve: deepShadowCurve,
+    toneCurveRed: { points: [[0, 0.02], [0.5, 0.54], [1, 1]] },
+    toneCurveGreen: { points: [[0, 0], [0.5, 0.47], [1, 0.93]] },
+    toneCurveBlue: { points: [[0, 0], [0.5, 0.44], [1, 0.88]] },
+    hsl: {
+      ...defaultHSL,
+      red:    { hue:  5, saturation: 28, luminance: -8  },
+      orange: { hue:  8, saturation: 20, luminance: -5  },
+      purple: { hue: -8, saturation: 18, luminance: -10 },
+    },
+  },
+
+  {
+    // Soft Grain (enhanced) — keep original but also add Candlelight
+    // Candlelight: extreme warmth, heavy orange/amber glow, intimate
+    name: "Candlelight",
+    exposure: 0.0, contrast: 8,
+    highlights: -30, shadows: 30, whites: -5, blacks: 15,
+    temperature: 10000, tint: 18,
+    vibrance: 28, saturation: 35,
+    clarity: 0, dehaze: 0,
+    vignette: -35, grain: 14, sharpening: 18,
+    toneCurve: filmCurve,
+    toneCurveRed: { points: [[0, 0.05], [0.5, 0.58], [1, 1]]     },
+    toneCurveGreen: { points: [[0, 0.01], [0.5, 0.49], [1, 0.92]] },
+    toneCurveBlue: { points: [[0, 0], [0.5, 0.38], [1, 0.78]]    },
+    hsl: {
+      ...defaultHSL,
+      red:    { hue: 10, saturation: 35, luminance: 10 },
+      orange: { hue: 12, saturation: 40, luminance: 15 },
+      yellow: { hue:  8, saturation: 30, luminance: 10 },
+    },
   },
 ];
