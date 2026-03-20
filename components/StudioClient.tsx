@@ -13,9 +13,12 @@ import { OCRClient } from "@/lib/pipeline/ocr";
 import { exportSanitized } from "@/lib/pipeline/export";
 import { createReceipt } from "@/lib/receipts/createReceipt";
 import { FileInfo, RiskLevel, ScanFindings } from "@/lib/pipeline/types";
-import { XMPFilterParams, readXMPFile, defaultFilterParams } from "@/lib/presets/xmpParser";
+import { XMPFilterParams, HSLAdjustments, readXMPFile, defaultFilterParams } from "@/lib/presets/xmpParser";
 import { BUILTIN_FILTERS } from "@/lib/presets/builtinFilters";
 import { applyFilterPreview, filterThumbnail } from "@/lib/presets/filterEngine";
+import ToneCurveEditor, { ToneCurves } from "@/components/ToneCurveEditor";
+import HSLPanel from "@/components/HSLPanel";
+import { identityCurve } from "@/lib/presets/toneCurve";
 import exifr from "exifr";
 
 const ocrClient = new OCRClient();
@@ -63,11 +66,33 @@ export default function StudioClient() {
   const [filterRendering,    setFilterRendering]     = useState(false);
 
   // Filter state
-  const [activeFilter,     setActiveFilter]     = useState<XMPFilterParams>(defaultFilterParams);
-  const [filterItems,      setFilterItems]      = useState<FilterItem[]>(
+  const [activeFilter,    setActiveFilter]    = useState<XMPFilterParams>(defaultFilterParams);
+  const [filterItems,     setFilterItems]     = useState<FilterItem[]>(
     BUILTIN_FILTERS.map((p) => ({ params: p, thumb: null }))
   );
-  const [importedFilters, setImportedFilters]  = useState<FilterItem[]>([]);
+  const [importedFilters, setImportedFilters] = useState<FilterItem[]>([]);
+
+  // Advanced adjustments (live — override the activeFilter's values)
+  const defaultCurves: ToneCurves = {
+    rgb: identityCurve,
+    r:   identityCurve,
+    g:   identityCurve,
+    b:   identityCurve,
+  };
+  const [curves, setCurves] = useState<ToneCurves>(defaultCurves);
+  const [hsl, setHsl] = useState<HSLAdjustments>(defaultFilterParams.hsl);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Merge active filter with manual curve/HSL overrides
+  // (manual adjustments layer on top of the preset values)
+  const mergedFilter: XMPFilterParams = {
+    ...activeFilter,
+    toneCurve:      curves.rgb,
+    toneCurveRed:   curves.r,
+    toneCurveGreen: curves.g,
+    toneCurveBlue:  curves.b,
+    hsl,
+  };
 
   // Mobile onboarding
   const [showFilterOnboarding, setShowFilterOnboarding] = useState(false);
@@ -113,13 +138,13 @@ export default function StudioClient() {
     }
   }, []);
 
-  // ─── Apply active filter to preview ───────────────────────────────────────
+  // ─── Apply merged filter to preview (re-runs on any change) ──────────────
 
   useEffect(() => {
     if (!bitmapRef.current) return;
     let cancelled = false;
     setFilterRendering(true);
-    applyFilterPreview(bitmapRef.current, activeFilter, 800)
+    applyFilterPreview(bitmapRef.current, mergedFilter, 800)
       .then((url) => {
         if (!cancelled) setFilteredPreviewUrl(url);
       })
@@ -127,7 +152,8 @@ export default function StudioClient() {
         if (!cancelled) setFilterRendering(false);
       });
     return () => { cancelled = true; };
-  }, [activeFilter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFilter, curves, hsl]);
 
   // ─── File handler ──────────────────────────────────────────────────────────
 
@@ -237,8 +263,11 @@ export default function StudioClient() {
     }
     if (newItems.length) {
       setImportedFilters((prev) => [...prev, ...newItems]);
-      // Auto-select the first imported preset
-      setActiveFilter(newItems[0].params);
+      // Auto-select the first imported preset and sync curves/HSL
+      const first = newItems[0].params;
+      setActiveFilter(first);
+      setCurves({ rgb: first.toneCurve, r: first.toneCurveRed, g: first.toneCurveGreen, b: first.toneCurveBlue });
+      setHsl(first.hsl);
     }
     // Reset input
     if (xmpInputRef.current) xmpInputRef.current.value = "";
@@ -289,7 +318,7 @@ export default function StudioClient() {
       addGrain:    sanitize.addGrain,
       quality:     resolvedFormat === "image/png" ? undefined : exportQuality,
       cropTop,
-      filter:      activeFilter.name === "None" ? null : activeFilter,
+      filter:      mergedFilter.name === "None" && curves.rgb === identityCurve ? null : mergedFilter,
     });
 
     const exportFile: FileInfo = {
@@ -373,7 +402,7 @@ export default function StudioClient() {
     const output = await exportSanitized(bitmapRef.current, {
       format:  resolvedFormat,
       quality: resolvedFormat === "image/png" ? undefined : exportQuality,
-      filter:  activeFilter.name === "None" ? null : activeFilter,
+      filter:  mergedFilter,
     });
 
     const exportFile: FileInfo = {
@@ -519,7 +548,11 @@ export default function StudioClient() {
               {allFilters.map((item) => (
                 <button
                   key={item.params.name}
-                  onClick={() => setActiveFilter(item.params)}
+                  onClick={() => {
+                    setActiveFilter(item.params);
+                    setCurves({ rgb: item.params.toneCurve, r: item.params.toneCurveRed, g: item.params.toneCurveGreen, b: item.params.toneCurveBlue });
+                    setHsl(item.params.hsl);
+                  }}
                   className={`flex-shrink-0 flex flex-col items-center gap-1 rounded-xl border p-1 transition ${
                     activeFilter.name === item.params.name
                       ? "border-white/60 bg-white/20"
@@ -587,6 +620,49 @@ export default function StudioClient() {
               </div>
             ) : (
               "File info appears here after import. Metadata is never read or stored."
+            )}
+          </div>
+
+          {/* ── Advanced adjustments accordion ── */}
+          <div>
+            <button
+              className="flex w-full items-center justify-between py-1 text-left"
+              onClick={() => setShowAdvanced((p) => !p)}
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-xs uppercase tracking-[0.2em] text-[color:var(--muted)]">
+                  Advanced
+                </span>
+                <span className="text-[10px] text-[color:var(--muted)] font-mono">
+                  Tone curve · HSL
+                </span>
+              </div>
+              <svg
+                className={`h-3 w-3 text-[color:var(--muted)] transition-transform duration-200 ${showAdvanced ? "rotate-180" : ""}`}
+                viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5"
+              >
+                <path d="M2 4.5l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+
+            {showAdvanced && (
+              <div className="mt-4 space-y-6">
+                {/* Tone Curve */}
+                <div>
+                  <div className="mb-3 text-[10px] uppercase tracking-[0.2em] text-[color:var(--muted)]">
+                    Tone Curve
+                  </div>
+                  <ToneCurveEditor curves={curves} onChange={setCurves} />
+                </div>
+
+                {/* HSL */}
+                <div>
+                  <div className="mb-3 text-[10px] uppercase tracking-[0.2em] text-[color:var(--muted)]">
+                    Color Mix
+                  </div>
+                  <HSLPanel hsl={hsl} onChange={setHsl} />
+                </div>
+              </div>
             )}
           </div>
 
