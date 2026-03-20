@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import GlassPanel from "@/components/GlassPanel";
-import RiskMeter from "@/components/RiskMeter";
+import PrivacyScore from "@/components/PrivacyScore";
 import FindingCard from "@/components/FindingCard";
 import ExportSheet from "@/components/ExportSheet";
 import BeforeAfterScrubber from "@/components/BeforeAfterScrubber";
@@ -59,6 +59,7 @@ export default function StudioClient() {
   const [autoCropEnabled, setAutoCropEnabled] = useState(false);
   const [verification,    setVerification]    = useState<{ metadataPresent: boolean } | null>(null);
   const [ocrAvailable,    setOcrAvailable]    = useState(true);
+  const [exported,        setExported]        = useState(false);
 
   // Preview
   const [previewUrl,         setPreviewUrl]         = useState<string | null>(null);
@@ -106,14 +107,7 @@ export default function StudioClient() {
   // Keep a ref to importedFilters so handleFile can read current state without stale closure
   const importedFiltersRef   = useRef<FilterItem[]>([]);
 
-  // ─── Derived risk level ────────────────────────────────────────────────────
-
-  const riskLevel = useMemo<RiskLevel>(() => {
-    if (!findings) return "social";
-    if (findings.faces.length || findings.textLeaks.length > 3) return "high";
-    if (findings.textLeaks.length || findings.codes.length || findings.metadata.exifPresent) return "work";
-    return "social";
-  }, [findings]);
+  // ─── Derived text leak summary ─────────────────────────────────────────────
 
   const textLeakSummary = useMemo(() => {
     if (!findings) return null;
@@ -171,6 +165,7 @@ export default function StudioClient() {
       setAutoCropEnabled(false);
       setReceiptJson(null);
       setVerification(null);
+      setExported(false);
       fileRef.current = file;
       if (previewUrl) URL.revokeObjectURL(previewUrl);
 
@@ -418,6 +413,7 @@ export default function StudioClient() {
       setVerification({ metadataPresent: false });
     }
 
+    setExported(true);
     setProcessing(false);
   };
 
@@ -485,6 +481,7 @@ export default function StudioClient() {
       setVerification({ metadataPresent: false });
     }
 
+    setExported(true);
     setProcessing(false);
   };
 
@@ -704,7 +701,7 @@ export default function StudioClient() {
 
       {/* ── Center panel: preview ── */}
       <GlassPanel className="p-6">
-        <div className="flex h-full flex-col gap-6">
+        <div className="flex h-full flex-col gap-4">
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-semibold">Safe Export Studio</h1>
@@ -713,49 +710,22 @@ export default function StudioClient() {
               </p>
             </div>
             {filterRendering && (
-              <div className="text-xs text-[color:var(--muted)] animate-pulse">Rendering filter…</div>
-            )}
-          </div>
-
-          <div className="flex-1 rounded-3xl border border-dashed border-white/20 bg-white/5 p-4 relative overflow-hidden">
-            {filteredPreviewUrl ? (
-              <img
-                src={filteredPreviewUrl}
-                alt="Filtered preview"
-                className="h-full w-full rounded-2xl object-contain"
-              />
-            ) : previewUrl ? (
-              <img
-                src={previewUrl}
-                alt="Preview"
-                className="h-full w-full rounded-2xl object-contain"
-              />
-            ) : (
-              <div className="flex h-full flex-col items-center justify-center gap-4 text-sm text-[color:var(--muted)]">
-                <div className="h-24 w-24 rounded-2xl border border-white/10 bg-white/10" />
-                Drop a photo to preview and edit
+              <div className="text-[10px] uppercase tracking-[0.2em] text-[color:var(--muted)] animate-pulse">
+                Rendering…
               </div>
             )}
           </div>
 
-          <BeforeAfterScrubber />
+          {/* Before / After scrubber fills the preview area */}
+          <div className="flex-1 rounded-3xl border border-white/10 bg-white/5 overflow-hidden" style={{ minHeight: 260 }}>
+            <BeforeAfterScrubber before={previewUrl} after={filteredPreviewUrl} />
+          </div>
+
           <ManualTools />
 
-          {verification && (
-            <div className={`rounded-2xl border p-4 text-xs ${
-              verification.metadataPresent
-                ? "border-red-400/30 bg-red-400/10 text-red-300"
-                : "border-white/10 bg-white/10 text-[color:var(--muted)]"
-            }`}>
-              {verification.metadataPresent
-                ? "⚠ Residual metadata detected in export — try PNG format for guaranteed clean output."
-                : "✓ Export verified clean — no EXIF, GPS, or device metadata present."}
-            </div>
-          )}
-
           {receiptJson && !verification && (
-            <div className="rounded-2xl border border-white/10 bg-white/10 p-4 text-xs text-[color:var(--muted)]">
-              Receipt saved. Check downloads for the JSON audit log.
+            <div className="rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-[10px] text-[color:var(--muted)]">
+              Receipt saved — check downloads for the JSON audit log.
             </div>
           )}
         </div>
@@ -764,7 +734,7 @@ export default function StudioClient() {
       {/* ── Right panel: findings + export ── */}
       <div className="space-y-6">
         <GlassPanel className="p-5">
-          <RiskMeter level={riskLevel} />
+          <PrivacyScore findings={findings} verified={verification} exported={exported} />
           <div className="mt-6 space-y-3">
             <FindingCard
               title="EXIF & GPS metadata"
